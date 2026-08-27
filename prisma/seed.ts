@@ -10,20 +10,63 @@ const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log('Clearing database...');
+  await prisma.contractCredential.deleteMany({});
   await prisma.invoice.deleteMany({});
   await prisma.contractRisk.deleteMany({});
   await prisma.changeRequest.deleteMany({});
   await prisma.milestone.deleteMany({});
   await prisma.contract.deleteMany({});
+  await prisma.company.deleteMany({});
   await prisma.monthlyReport.deleteMany({});
 
   console.log('Seeding CLMS database...');
 
-  // 1. MSA Contract (Master Services Agreement)
+  // 0. Companies
+  const companyInfometter = await prisma.company.create({
+    data: {
+      name: 'INFOMETTER Tecnologia',
+      code: 'INFOMETTER',
+      tax_id: '34.892.104/0001-52',
+      color: '#0284c7',
+      is_holding: false,
+    },
+  });
+
+  const companyNexus = await prisma.company.create({
+    data: {
+      name: 'Nexus Cloud Systems',
+      code: 'NEXUS',
+      tax_id: '18.234.567/0001-89',
+      color: '#3b82f6',
+      is_holding: false,
+    },
+  });
+
+  // 1. INFOMETTER - Contrato Principal de Prestação de Serviços e Software
+  const infometterContract = await prisma.contract.create({
+    data: {
+      company_id: companyInfometter.id,
+      title: 'Contrato de Prestação de Serviços de TI e Licenciamento INFOMETTER',
+      type: 'SAAS',
+      nature: 'EXPENSE',
+      counterpart: 'INFOMETTER Tecnologia e Serviços Ltda',
+      status: 'ACTIVE',
+      start_date: new Date('2026-01-01'),
+      end_date: new Date('2026-12-31'),
+      auto_renewal: true,
+      notice_period_days: 30,
+      total_value: 360000.00,
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/contrato-infometter-2026.pdf',
+    },
+  });
+
+  // 2. MSA Contract (Master Services Agreement)
   const msa = await prisma.contract.create({
     data: {
+      company_id: companyNexus.id,
       title: 'Master Services Agreement - Cloud Infrastructure Outsourcing',
       type: 'MSA',
+      nature: 'EXPENSE',
       counterpart: 'Nexus Cloud Systems Ltd.',
       status: 'ACTIVE',
       start_date: new Date('2026-01-01'),
@@ -35,11 +78,13 @@ async function main() {
     },
   });
 
-  // 2. SOW Contract (Statement of Work) - linked to MSA counterpart
+  // 3. SOW Contract (Statement of Work) - linked to MSA counterpart
   const sow = await prisma.contract.create({
     data: {
+      company_id: companyNexus.id,
       title: 'SOW #01 - Migration of Core ERP to Google Cloud Platform',
       type: 'SOW',
+      nature: 'EXPENSE',
       counterpart: 'Nexus Cloud Systems Ltd.',
       status: 'ACTIVE',
       start_date: new Date('2026-02-15'),
@@ -51,11 +96,12 @@ async function main() {
     },
   });
 
-  // 3. SLA Contract (Service Level Agreement)
+  // 4. SLA Contract (Service Level Agreement)
   const sla = await prisma.contract.create({
     data: {
       title: 'SLA - Core Applications 24/7 Managed Support Services',
       type: 'SLA',
+      nature: 'EXPENSE',
       counterpart: 'Apex Helpdesk Corp.',
       status: 'ACTIVE',
       start_date: new Date('2026-03-01'),
@@ -67,11 +113,12 @@ async function main() {
     },
   });
 
-  // 4. SaaS Subscription Agreement
+  // 5. SaaS Subscription Agreement
   const saas = await prisma.contract.create({
     data: {
       title: 'Enterprise Licence Agreement - Analytics Dashboard Suite',
       type: 'SAAS',
+      nature: 'EXPENSE',
       counterpart: 'Insightful BI LLC',
       status: 'ACTIVE',
       start_date: new Date('2026-06-01'),
@@ -83,11 +130,12 @@ async function main() {
     },
   });
 
-  // 5. NDA Contract (Non-Disclosure Agreement)
+  // 6. NDA Contract (Non-Disclosure Agreement)
   const nda = await prisma.contract.create({
     data: {
       title: 'Mutual NDA for Strategic Partnerships Exploration',
       type: 'NDA',
+      nature: 'EXPENSE',
       counterpart: 'Synergy Devs Inc.',
       status: 'ACTIVE',
       start_date: new Date('2026-08-01'),
