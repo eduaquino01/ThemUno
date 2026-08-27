@@ -1,0 +1,204 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ContractNature {
+  REVENUE
+  EXPENSE
+}
+
+enum ContractType {
+  MSA
+  SOW
+  SLA
+  NDA
+  SAAS
+  HARDWARE
+  PARTNERSHIP
+  AMENDMENT
+}
+
+enum ContractStatus {
+  DRAFT
+  IN_REVIEW
+  ACTIVE
+  EXPIRED
+  TERMINATED
+}
+
+enum AcceptanceStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum ChangeRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum RiskCategory {
+  LGPD
+  FINANCIAL
+  OPERATIONAL
+  IP
+  COMPLIANCE
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum InvoiceStatus {
+  PENDING_ACCEPTANCE
+  ISSUED
+  PAID
+  DISPUTED
+}
+
+enum MonthlyReportStatus {
+  DRAFT
+  CONSOLIDATED
+  SENT
+}
+
+enum CredentialType {
+  PORTAL_LOGIN
+  API_KEY
+  SOFTWARE_LICENSE
+  SERVICE_ACCOUNT
+  PERSONAL_ACCOUNT
+  OTHER
+}
+
+model Company {
+  id          String     @id @default(uuid())
+  name        String
+  code        String     @unique
+  tax_id      String?
+  color       String     @default("#3b82f6")
+  is_holding  Boolean    @default(false)
+  created_at  DateTime   @default(now())
+  contracts   Contract[]
+}
+
+model Contract {
+  id                 String          @id @default(uuid())
+  company_id         String?
+  company            Company?        @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  title              String
+  type               ContractType
+  nature             ContractNature  @default(EXPENSE)
+  counterpart        String
+  status             ContractStatus  @default(DRAFT)
+  start_date         DateTime
+  end_date           DateTime
+  auto_renewal       Boolean         @default(false)
+  notice_period_days Int             @default(30)
+  total_value        Decimal
+  raw_text_or_url    String?
+  created_at         DateTime        @default(now())
+  updated_at         DateTime        @updatedAt
+
+  milestones         Milestone[]
+  change_requests    ChangeRequest[] @relation("ContractChangeRequests")
+  risks              ContractRisk[]
+  invoices           Invoice[]
+  credentials        ContractCredential[]
+
+  // Self-relation: Amendments originate from change requests on contracts
+  amendments         ChangeRequest[] @relation("AmendmentContract")
+}
+
+model Milestone {
+  id                 String           @id @default(uuid())
+  contract_id        String
+  contract           Contract         @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  title              String
+  scope_description  String
+  due_date           DateTime
+  acceptance_criteria String
+  acceptance_status  AcceptanceStatus @default(PENDING)
+  billing_value      Decimal
+  invoice_id         String?          // Associated invoice id
+  invoices           Invoice[]        // Invoice relationship
+}
+
+model ChangeRequest {
+  id                    String              @id @default(uuid())
+  contract_id           String
+  contract              Contract            @relation("ContractChangeRequests", fields: [contract_id], references: [id], onDelete: Cascade)
+  title                 String
+  requested_by          String
+  scope_impact          String
+  financial_impact      Decimal
+  time_impact_days      Int
+  status                ChangeRequestStatus @default(DRAFT)
+  amendment_contract_id String?             @unique
+  amendment_contract    Contract?           @relation("AmendmentContract", fields: [amendment_contract_id], references: [id], onDelete: SetNull)
+  created_at            DateTime            @default(now())
+  updated_at            DateTime            @updatedAt
+}
+
+model ContractRisk {
+  id              String       @id @default(uuid())
+  contract_id     String
+  contract        Contract     @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  category        RiskCategory
+  risk_level      RiskLevel
+  description     String
+  mitigation_plan String
+  status          String       // E.g. "IDENTIFIED", "MITIGATED", "MONITORED"
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @updatedAt
+}
+
+model Invoice {
+  id                String        @id @default(uuid())
+  milestone_id      String?
+  milestone         Milestone?    @relation(fields: [milestone_id], references: [id], onDelete: SetNull)
+  contract_id       String
+  contract          Contract      @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  invoice_number    String
+  issue_date        DateTime
+  due_date          DateTime
+  amount            Decimal
+  status            InvoiceStatus @default(PENDING_ACCEPTANCE)
+  payment_proof_url String?
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @updatedAt
+}
+
+model ContractCredential {
+  id            String          @id @default(uuid())
+  contract_id   String?
+  contract      Contract?       @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  type          CredentialType  @default(PORTAL_LOGIN)
+  title         String
+  username      String?
+  secret_value  String
+  login_url     String?
+  notes         String?
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @updatedAt
+}
+
+model MonthlyReport {
+  id                 String              @id @default(uuid())
+  period_month_year  String              // Format: "YYYY-MM"
+  performed_activities Json              // JSON mapping activities log
+  next_month_plan    Json                // JSON mapping planned items
+  generated_pdf_url  String?
+  status             MonthlyReportStatus @default(DRAFT)
+  created_at         DateTime            @default(now())
+  updated_at         DateTime            @updatedAt
+}

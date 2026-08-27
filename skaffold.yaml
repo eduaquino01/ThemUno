@@ -1,0 +1,13 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: clms
+build:
+  artifacts:
+    - image: clms-app
+      docker:
+        dockerfile: Dockerfile
+deploy:
+  cloudrun:
+    project: clms-gcp-project
+    region: us-central1
