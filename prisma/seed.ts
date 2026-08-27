@@ -24,19 +24,19 @@ async function main() {
   // 0. Companies
   const companySmarttsRJ = await prisma.company.create({
     data: {
-      name: 'Smartts Utilities RJ',
+      name: 'SMARTTS UTILITIES RJ SPE LTDA',
       code: 'SMARTTS-RJ',
-      tax_id: '12.345.678/0001-10',
+      tax_id: '59.775.075/0001-97',
       color: '#2563eb',
       is_holding: false,
     },
   });
 
-  const companySmarttsCE = await prisma.company.create({
+  const companySmarttsSPE = await prisma.company.create({
     data: {
-      name: 'Smartts Utilities CE',
-      code: 'SMARTTS-CE',
-      tax_id: '12.345.678/0002-20',
+      name: 'SMARTTS UTILITIES SPE LTDA',
+      code: 'SMARTTS-SPE',
+      tax_id: '43.287.233/0001-20',
       color: '#0284c7',
       is_holding: false,
     },
@@ -44,9 +44,9 @@ async function main() {
 
   const companyIntegra = await prisma.company.create({
     data: {
-      name: 'Íntegra Utilities',
+      name: 'INTEGRA UTILITES LTDA',
       code: 'INTEGRA',
-      tax_id: '98.765.432/0001-99',
+      tax_id: '42.444.048/0001-39',
       color: '#059669',
       is_holding: false,
     },
@@ -54,9 +54,9 @@ async function main() {
 
   const companyAba = await prisma.company.create({
     data: {
-      name: 'ABA Blockchain',
+      name: 'ABA BLOCKCHAIN TECNOLOGIA DE INFORMACAO LTDA',
       code: 'ABA-BLOCK',
-      tax_id: '45.678.910/0001-33',
+      tax_id: '52.417.596/0001-23',
       color: '#7c3aed',
       is_holding: false,
     },
@@ -64,22 +64,22 @@ async function main() {
 
   const companyInfometter = await prisma.company.create({
     data: {
-      name: 'Infometter',
+      name: 'INFOMETTER SOLUCOES EM SOFTWARE',
       code: 'INFOMETTER',
-      tax_id: '34.892.104/0001-52',
+      tax_id: '11.426.794/0001-76',
       color: '#d97706',
       is_holding: false,
     },
   });
 
-  // 1. Smartts Utilities RJ - Contrato Operacional RJ
+  // 1. SMARTTS UTILITIES RJ SPE LTDA - Contrato Operacional RJ
   const smarttsRJContract = await prisma.contract.create({
     data: {
       company_id: companySmarttsRJ.id,
       title: 'Contrato de Gestão e Operação de Infrastructure Utilities RJ',
       type: 'MSA',
       nature: 'EXPENSE',
-      counterpart: 'Smartts Utilities RJ Ltda',
+      counterpart: 'SMARTTS UTILITIES RJ SPE LTDA',
       status: 'ACTIVE',
       start_date: new Date('2026-01-01'),
       end_date: new Date('2027-12-31'),
@@ -90,32 +90,32 @@ async function main() {
     },
   });
 
-  // 2. Smartts Utilities CE - Contrato Operacional CE
+  // 2. SMARTTS UTILITIES SPE LTDA - Contrato Operacional SPE
   const smarttsCEContract = await prisma.contract.create({
     data: {
-      company_id: companySmarttsCE.id,
-      title: 'Contrato de Suporte e Manutenção de Utilities - Região CE',
+      company_id: companySmarttsSPE.id,
+      title: 'Contrato de Suporte e Manutenção de Utilities - SPE',
       type: 'SOW',
       nature: 'EXPENSE',
-      counterpart: 'Smartts Utilities CE Ltda',
+      counterpart: 'SMARTTS UTILITIES SPE LTDA',
       status: 'ACTIVE',
       start_date: new Date('2026-02-01'),
       end_date: new Date('2027-01-31'),
       auto_renewal: true,
       notice_period_days: 30,
       total_value: 420000.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/smartts-ce-2026.pdf',
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/smartts-spe-2026.pdf',
     },
   });
 
-  // 3. Íntegra Utilities - Contrato de Integração de Sistemas
+  // 3. INTEGRA UTILITES LTDA - Contrato de Integração de Sistemas
   const integraContract = await prisma.contract.create({
     data: {
       company_id: companyIntegra.id,
       title: 'Contrato de Plataforma de Integrabilidade e Automação de Sistemas',
       type: 'SAAS',
       nature: 'EXPENSE',
-      counterpart: 'Íntegra Utilities Soluções S/A',
+      counterpart: 'INTEGRA UTILITES LTDA',
       status: 'ACTIVE',
       start_date: new Date('2026-03-15'),
       end_date: new Date('2027-03-14'),
@@ -126,14 +126,14 @@ async function main() {
     },
   });
 
-  // 4. ABA Blockchain - Contrato de Soluções Blockchain
+  // 4. ABA BLOCKCHAIN TECNOLOGIA DE INFORMACAO LTDA - Contrato de Soluções Blockchain
   const abaContract = await prisma.contract.create({
     data: {
       company_id: companyAba.id,
       title: 'Contrato de Desenvolvimento e Infraestrutura ABA Blockchain',
       type: 'SOW',
       nature: 'EXPENSE',
-      counterpart: 'ABA Blockchain Technologies Ltd.',
+      counterpart: 'ABA BLOCKCHAIN TECNOLOGIA DE INFORMACAO LTDA',
       status: 'ACTIVE',
       start_date: new Date('2026-04-01'),
       end_date: new Date('2027-03-31'),
@@ -144,14 +144,14 @@ async function main() {
     },
   });
 
-  // 5. Infometter - Contrato de Licenciamento e Serviços
+  // 5. INFOMETTER SOLUCOES EM SOFTWARE - Contrato de Licenciamento e Serviços
   const infometterContract = await prisma.contract.create({
     data: {
       company_id: companyInfometter.id,
       title: 'Contrato de Licenciamento de Software e Serviços Infometter',
       type: 'SAAS',
       nature: 'EXPENSE',
-      counterpart: 'Infometter Tecnologia e Serviços Ltda',
+      counterpart: 'INFOMETTER SOLUCOES EM SOFTWARE',
       status: 'ACTIVE',
       start_date: new Date('2026-01-01'),
       end_date: new Date('2026-12-31'),
