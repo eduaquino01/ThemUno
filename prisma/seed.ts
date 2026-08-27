@@ -22,201 +22,204 @@ async function main() {
   console.log('Seeding CLMS database...');
 
   // 0. Companies
-  const companyInfometter = await prisma.company.create({
+  const companySmarttsRJ = await prisma.company.create({
     data: {
-      name: 'INFOMETTER Tecnologia',
-      code: 'INFOMETTER',
-      tax_id: '34.892.104/0001-52',
+      name: 'Smartts Utilities RJ',
+      code: 'SMARTTS-RJ',
+      tax_id: '12.345.678/0001-10',
+      color: '#2563eb',
+      is_holding: false,
+    },
+  });
+
+  const companySmarttsCE = await prisma.company.create({
+    data: {
+      name: 'Smartts Utilities CE',
+      code: 'SMARTTS-CE',
+      tax_id: '12.345.678/0002-20',
       color: '#0284c7',
       is_holding: false,
     },
   });
 
-  const companyNexus = await prisma.company.create({
+  const companyIntegra = await prisma.company.create({
     data: {
-      name: 'Nexus Cloud Systems',
-      code: 'NEXUS',
-      tax_id: '18.234.567/0001-89',
-      color: '#3b82f6',
+      name: 'Íntegra Utilities',
+      code: 'INTEGRA',
+      tax_id: '98.765.432/0001-99',
+      color: '#059669',
       is_holding: false,
     },
   });
 
-  // 1. INFOMETTER - Contrato Principal de Prestação de Serviços e Software
+  const companyAba = await prisma.company.create({
+    data: {
+      name: 'ABA Blockchain',
+      code: 'ABA-BLOCK',
+      tax_id: '45.678.910/0001-33',
+      color: '#7c3aed',
+      is_holding: false,
+    },
+  });
+
+  const companyInfometter = await prisma.company.create({
+    data: {
+      name: 'Infometter',
+      code: 'INFOMETTER',
+      tax_id: '34.892.104/0001-52',
+      color: '#d97706',
+      is_holding: false,
+    },
+  });
+
+  // 1. Smartts Utilities RJ - Contrato Operacional RJ
+  const smarttsRJContract = await prisma.contract.create({
+    data: {
+      company_id: companySmarttsRJ.id,
+      title: 'Contrato de Gestão e Operação de Infrastructure Utilities RJ',
+      type: 'MSA',
+      nature: 'EXPENSE',
+      counterpart: 'Smartts Utilities RJ Ltda',
+      status: 'ACTIVE',
+      start_date: new Date('2026-01-01'),
+      end_date: new Date('2027-12-31'),
+      auto_renewal: true,
+      notice_period_days: 60,
+      total_value: 580000.00,
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/smartts-rj-2026.pdf',
+    },
+  });
+
+  // 2. Smartts Utilities CE - Contrato Operacional CE
+  const smarttsCEContract = await prisma.contract.create({
+    data: {
+      company_id: companySmarttsCE.id,
+      title: 'Contrato de Suporte e Manutenção de Utilities - Região CE',
+      type: 'SOW',
+      nature: 'EXPENSE',
+      counterpart: 'Smartts Utilities CE Ltda',
+      status: 'ACTIVE',
+      start_date: new Date('2026-02-01'),
+      end_date: new Date('2027-01-31'),
+      auto_renewal: true,
+      notice_period_days: 30,
+      total_value: 420000.00,
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/smartts-ce-2026.pdf',
+    },
+  });
+
+  // 3. Íntegra Utilities - Contrato de Integração de Sistemas
+  const integraContract = await prisma.contract.create({
+    data: {
+      company_id: companyIntegra.id,
+      title: 'Contrato de Plataforma de Integrabilidade e Automação de Sistemas',
+      type: 'SAAS',
+      nature: 'EXPENSE',
+      counterpart: 'Íntegra Utilities Soluções S/A',
+      status: 'ACTIVE',
+      start_date: new Date('2026-03-15'),
+      end_date: new Date('2027-03-14'),
+      auto_renewal: true,
+      notice_period_days: 45,
+      total_value: 320000.00,
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/integra-utilities-2026.pdf',
+    },
+  });
+
+  // 4. ABA Blockchain - Contrato de Soluções Blockchain
+  const abaContract = await prisma.contract.create({
+    data: {
+      company_id: companyAba.id,
+      title: 'Contrato de Desenvolvimento e Infraestrutura ABA Blockchain',
+      type: 'SOW',
+      nature: 'EXPENSE',
+      counterpart: 'ABA Blockchain Technologies Ltd.',
+      status: 'ACTIVE',
+      start_date: new Date('2026-04-01'),
+      end_date: new Date('2027-03-31'),
+      auto_renewal: false,
+      notice_period_days: 30,
+      total_value: 650000.00,
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/aba-blockchain-2026.pdf',
+    },
+  });
+
+  // 5. Infometter - Contrato de Licenciamento e Serviços
   const infometterContract = await prisma.contract.create({
     data: {
       company_id: companyInfometter.id,
-      title: 'Contrato de Prestação de Serviços de TI e Licenciamento INFOMETTER',
+      title: 'Contrato de Licenciamento de Software e Serviços Infometter',
       type: 'SAAS',
       nature: 'EXPENSE',
-      counterpart: 'INFOMETTER Tecnologia e Serviços Ltda',
+      counterpart: 'Infometter Tecnologia e Serviços Ltda',
       status: 'ACTIVE',
       start_date: new Date('2026-01-01'),
       end_date: new Date('2026-12-31'),
       auto_renewal: true,
       notice_period_days: 30,
       total_value: 360000.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/contrato-infometter-2026.pdf',
+      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/infometter-2026.pdf',
     },
   });
 
-  // 2. MSA Contract (Master Services Agreement)
-  const msa = await prisma.contract.create({
-    data: {
-      company_id: companyNexus.id,
-      title: 'Master Services Agreement - Cloud Infrastructure Outsourcing',
-      type: 'MSA',
-      nature: 'EXPENSE',
-      counterpart: 'Nexus Cloud Systems Ltd.',
-      status: 'ACTIVE',
-      start_date: new Date('2026-01-01'),
-      end_date: new Date('2027-12-31'),
-      auto_renewal: true,
-      notice_period_days: 90,
-      total_value: 1200000.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/msa-nexus-2026.pdf',
-    },
-  });
-
-  // 3. SOW Contract (Statement of Work) - linked to MSA counterpart
-  const sow = await prisma.contract.create({
-    data: {
-      company_id: companyNexus.id,
-      title: 'SOW #01 - Migration of Core ERP to Google Cloud Platform',
-      type: 'SOW',
-      nature: 'EXPENSE',
-      counterpart: 'Nexus Cloud Systems Ltd.',
-      status: 'ACTIVE',
-      start_date: new Date('2026-02-15'),
-      end_date: new Date('2026-12-15'),
-      auto_renewal: false,
-      notice_period_days: 30,
-      total_value: 450000.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/sow-nexus-erp-migration.pdf',
-    },
-  });
-
-  // 4. SLA Contract (Service Level Agreement)
-  const sla = await prisma.contract.create({
-    data: {
-      title: 'SLA - Core Applications 24/7 Managed Support Services',
-      type: 'SLA',
-      nature: 'EXPENSE',
-      counterpart: 'Apex Helpdesk Corp.',
-      status: 'ACTIVE',
-      start_date: new Date('2026-03-01'),
-      end_date: new Date('2027-02-28'),
-      auto_renewal: true,
-      notice_period_days: 60,
-      total_value: 180000.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/sla-apex-support.pdf',
-    },
-  });
-
-  // 5. SaaS Subscription Agreement
-  const saas = await prisma.contract.create({
-    data: {
-      title: 'Enterprise Licence Agreement - Analytics Dashboard Suite',
-      type: 'SAAS',
-      nature: 'EXPENSE',
-      counterpart: 'Insightful BI LLC',
-      status: 'ACTIVE',
-      start_date: new Date('2026-06-01'),
-      end_date: new Date('2027-05-31'),
-      auto_renewal: true,
-      notice_period_days: 45,
-      total_value: 75000.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/saas-insightful-bi.pdf',
-    },
-  });
-
-  // 6. NDA Contract (Non-Disclosure Agreement)
-  const nda = await prisma.contract.create({
-    data: {
-      title: 'Mutual NDA for Strategic Partnerships Exploration',
-      type: 'NDA',
-      nature: 'EXPENSE',
-      counterpart: 'Synergy Devs Inc.',
-      status: 'ACTIVE',
-      start_date: new Date('2026-08-01'),
-      end_date: new Date('2029-07-31'),
-      auto_renewal: false,
-      notice_period_days: 0,
-      total_value: 0.00,
-      raw_text_or_url: 'https://storage.googleapis.com/clms-contracts/mnda-synergy-devs.pdf',
-    },
-  });
-
-  // --- Milestones for SOW Contract (ERP Migration) ---
+  // --- Milestones for Smartts Utilities RJ Contract ---
   const m1 = await prisma.milestone.create({
     data: {
-      contract_id: sow.id,
-      title: 'Milestone 1: Blueprint & Architecture Design Approval',
-      scope_description: 'Delivery and formal acceptance of the Cloud Architecture Blueprint and Migration Path Plan.',
+      contract_id: smarttsRJContract.id,
+      title: 'Milestone 1: Mapeamento de Infraestrutura & Diagnóstico Operacional RJ',
+      scope_description: 'Levantamento detalhado e auditoria de campo em todas as subestações e utilidades da região RJ.',
       due_date: new Date('2026-04-15'),
-      acceptance_criteria: 'Architectural diagrams signed off by IT Director, and migration security framework cleared.',
+      acceptance_criteria: 'Relatório técnico assinado pela diretoria e mapa de ativos validado.',
       acceptance_status: 'ACCEPTED',
-      billing_value: 90000.00,
+      billing_value: 120000.00,
     },
   });
 
   const m2 = await prisma.milestone.create({
     data: {
-      contract_id: sow.id,
-      title: 'Milestone 2: Database Migration & Schema Mapping',
-      scope_description: 'Migration of database schemas, replication test, and initial validation run in dev environment.',
+      contract_id: smarttsRJContract.id,
+      title: 'Milestone 2: Implantação de Sensores IoT & Telemetria',
+      scope_description: 'Instalação e integração da malha de sensores de telemetria em tempo real.',
       due_date: new Date('2026-07-15'),
-      acceptance_criteria: 'Zero data mismatch on 10M rows test sync. Read latency under 5ms.',
+      acceptance_criteria: 'Zero perda de pacotes e latência de leitura abaixo de 10ms.',
       acceptance_status: 'ACCEPTED',
-      billing_value: 135000.00,
+      billing_value: 180000.00,
     },
   });
 
   const m3 = await prisma.milestone.create({
     data: {
-      contract_id: sow.id,
-      title: 'Milestone 3: Application Deployment in Staging',
-      scope_description: 'Full stack deployment in staging environment, integration tests, and performance load test.',
+      contract_id: smarttsRJContract.id,
+      title: 'Milestone 3: Rollout do Painel de Controle Operacional',
+      scope_description: 'Entrega do painel centralizado de monitoramento e automação de alertas.',
       due_date: new Date('2026-10-15'),
-      acceptance_criteria: 'All services running. Load testing exceeding 1000 requests/second with error rate < 0.1%.',
+      acceptance_criteria: 'Painel ativo com 99.9% de uptime garantido nos testes de homologação.',
       acceptance_status: 'PENDING',
-      billing_value: 135000.00,
+      billing_value: 150000.00,
     },
   });
 
-  const m4 = await prisma.milestone.create({
-    data: {
-      contract_id: sow.id,
-      title: 'Milestone 4: Final Go-Live & Post-Migration Hypercare',
-      scope_description: 'Production switchover, data reconciliation validation, and 30 days of direct support.',
-      due_date: new Date('2026-12-15'),
-      acceptance_criteria: 'Production environment active. Support tickets resolved within standard operational times.',
-      acceptance_status: 'PENDING',
-      billing_value: 90000.00,
-    },
-  });
-
-  // --- Change Requests for SOW Contract (ERP Migration) ---
+  // --- Change Requests ---
   await prisma.changeRequest.create({
     data: {
-      contract_id: sow.id,
-      title: 'Scope Expansion - Additional Dev/Test Environments Setup',
-      requested_by: 'PM John Doe',
-      scope_impact: 'Provisioning and configuration of 2 supplementary isolated environments for QA testing.',
-      financial_impact: 18500.00,
-      time_impact_days: 10,
+      contract_id: smarttsRJContract.id,
+      title: 'Expansão de Escopo - Cobertura de Pontos Adicionais em Niteroi',
+      requested_by: 'Eng. Roberto Santos',
+      scope_impact: 'Inclusão de 15 pontos adicionais de monitoramento de utilidades.',
+      financial_impact: 45000.00,
+      time_impact_days: 15,
       status: 'APPROVED',
     },
   });
 
   await prisma.changeRequest.create({
     data: {
-      contract_id: sow.id,
-      title: 'Legacy System Integration Connector development',
-      requested_by: 'PM Jane Smith',
-      scope_impact: 'Coding of custom legacy connectors for direct on-premise ledger sync.',
-      financial_impact: 32000.00,
-      time_impact_days: 20,
+      contract_id: abaContract.id,
+      title: 'Implementação de Módulo de Rastreabilidade em Blockchain',
+      requested_by: 'Tech Lead ABA',
+      scope_impact: 'Desenvolvimento de smart contracts para registro imutável de medições.',
+      financial_impact: 68000.00,
+      time_impact_days: 25,
       status: 'SUBMITTED',
     },
   });
@@ -224,75 +227,72 @@ async function main() {
   // --- Risks Matrix for Contracts ---
   await prisma.contractRisk.create({
     data: {
-      contract_id: sow.id,
-      category: 'LGPD',
-      risk_level: 'CRITICAL',
-      description: 'Storage of sensitive legacy user profile records in Cloud Storage without field encryption.',
-      mitigation_plan: 'Enforce application-level envelope encryption prior to upload. Restrict IAM permissions.',
-      status: 'IDENTIFIED',
-    },
-  });
-
-  await prisma.contractRisk.create({
-    data: {
-      contract_id: msa.id,
-      category: 'FINANCIAL',
+      contract_id: smarttsRJContract.id,
+      category: 'OPERATIONAL',
       risk_level: 'HIGH',
-      description: 'Currency exchange fluctuation impact on hourly rate adjustments for overseas specialists.',
-      mitigation_plan: 'Define fixed rate bands with standard indexing applied annually.',
+      description: 'Risco de interrupção temporária durante a troca de sensores de telemetria.',
+      mitigation_plan: 'Executar janelas de manutenção em horários de menor tráfego operacional.',
       status: 'MITIGATED',
     },
   });
 
   await prisma.contractRisk.create({
     data: {
-      contract_id: sla.id,
-      category: 'OPERATIONAL',
+      contract_id: abaContract.id,
+      category: 'FINANCIAL',
+      risk_level: 'CRITICAL',
+      description: 'Oscilação nas taxas de gas/transação da rede Blockchain.',
+      mitigation_plan: 'Adotar solução de Layer 2 com taxas fixadas em contrato.',
+      status: 'IDENTIFIED',
+    },
+  });
+
+  await prisma.contractRisk.create({
+    data: {
+      contract_id: integraContract.id,
+      category: 'COMPLIANCE',
       risk_level: 'MEDIUM',
-      description: 'Potential support response delays during year-end peak infrastructure activity.',
-      mitigation_plan: 'Mandate temporary staff scale-up and pre-scheduled change windows.',
+      description: 'Conformidade com padrões de integração de APIs governamentais.',
+      mitigation_plan: 'Realizar auditoria prévia dos pacotes de dados enviados.',
       status: 'MONITORED',
     },
   });
 
-  // --- Invoices & Reconciliation Log ---
-  // Invoice for Milestone 1 (Accepted and Issued/Paid)
+  // --- Invoices ---
   await prisma.invoice.create({
     data: {
-      contract_id: sow.id,
+      contract_id: smarttsRJContract.id,
       milestone_id: m1.id,
-      invoice_number: 'INV-2026-001',
+      invoice_number: 'INV-RJ-2026-001',
       issue_date: new Date('2026-04-20'),
       due_date: new Date('2026-05-20'),
-      amount: 90000.00,
+      amount: 120000.00,
       status: 'PAID',
-      payment_proof_url: 'https://storage.googleapis.com/clms-invoices/proofs/pay-001.pdf',
+      payment_proof_url: 'https://storage.googleapis.com/clms-invoices/proofs/pay-rj-001.pdf',
     },
   });
 
-  // Invoice for Milestone 2 (Accepted, Invoice Issued but Pending Payment)
   await prisma.invoice.create({
     data: {
-      contract_id: sow.id,
+      contract_id: smarttsRJContract.id,
       milestone_id: m2.id,
-      invoice_number: 'INV-2026-008',
+      invoice_number: 'INV-RJ-2026-002',
       issue_date: new Date('2026-07-18'),
       due_date: new Date('2026-08-18'),
-      amount: 135000.00,
+      amount: 180000.00,
       status: 'ISSUED',
     },
   });
 
-  // Disputed Invoice for SLA Managed Support
   await prisma.invoice.create({
     data: {
-      contract_id: sla.id,
-      invoice_number: 'INV-APEX-492',
+      contract_id: infometterContract.id,
+      invoice_number: 'INV-INFOMETTER-07',
       issue_date: new Date('2026-07-01'),
       due_date: new Date('2026-07-31'),
-      amount: 15000.00,
-      status: 'DISPUTED',
-      payment_proof_url: 'https://storage.googleapis.com/clms-invoices/disputes/apex-july-claims.pdf',
+      amount: 30000.00,
+      status: 'PAID',
+      payment_proof_url: 'https://storage.googleapis.com/clms-invoices/proofs/infometter-july.pdf',
     },
   });
 
