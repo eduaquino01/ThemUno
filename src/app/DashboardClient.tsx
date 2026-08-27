@@ -65,10 +65,20 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
       setSelectedCompanyId(e.detail || 'ALL');
     };
     window.addEventListener('themuno_company_changed', handleCompanyChange);
+
     const saved = localStorage.getItem('themuno_selected_company_id');
-    if (saved) setSelectedCompanyId(saved);
+    if (saved && saved !== 'ALL') {
+      const allContracts = initialData.contracts || [];
+      const hasCompanyInContracts = allContracts.some((c: any) => c.company_id === saved || c.company?.id === saved);
+      if (hasCompanyInContracts) {
+        setSelectedCompanyId(saved);
+      } else {
+        setSelectedCompanyId('ALL');
+        localStorage.setItem('themuno_selected_company_id', 'ALL');
+      }
+    }
     return () => window.removeEventListener('themuno_company_changed', handleCompanyChange);
-  }, []);
+  }, [initialData]);
 
   // Dynamic state for data
   const [contracts, setContracts] = useState<any[]>(initialData.contracts || []);

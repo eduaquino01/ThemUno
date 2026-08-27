@@ -29,7 +29,22 @@ export default function CompanySelector({ onCompanyChange }: CompanySelectorProp
   const loadCompanies = async () => {
     try {
       const data = await getCompanies();
-      setCompanies(data || []);
+      const loadedComps = data || [];
+      setCompanies(loadedComps);
+
+      const saved = localStorage.getItem('themuno_selected_company_id');
+      if (saved && saved !== 'ALL') {
+        const exists = loadedComps.some((c: any) => c.id === saved);
+        if (!exists) {
+          localStorage.setItem('themuno_selected_company_id', 'ALL');
+          setSelectedCompanyId('ALL');
+          if (onCompanyChange) onCompanyChange('ALL');
+          window.dispatchEvent(new CustomEvent('themuno_company_changed', { detail: 'ALL' }));
+        } else {
+          setSelectedCompanyId(saved);
+          if (onCompanyChange) onCompanyChange(saved);
+        }
+      }
     } catch (err) {
       console.error('Error loading companies:', err);
     }
@@ -37,13 +52,6 @@ export default function CompanySelector({ onCompanyChange }: CompanySelectorProp
 
   useEffect(() => {
     loadCompanies();
-
-    // Check localStorage for saved company preference
-    const saved = localStorage.getItem('themuno_selected_company_id');
-    if (saved) {
-      setSelectedCompanyId(saved);
-      if (onCompanyChange) onCompanyChange(saved);
-    }
   }, []);
 
   const handleSelect = (id: string | 'ALL') => {

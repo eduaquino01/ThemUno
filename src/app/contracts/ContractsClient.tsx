@@ -66,7 +66,19 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
   useEffect(() => {
     async function loadCompanies() {
       const comps = await getCompanies();
-      setCompaniesList(comps || []);
+      const loaded = comps || [];
+      setCompaniesList(loaded);
+
+      const saved = localStorage.getItem('themuno_selected_company_id');
+      if (saved && saved !== 'ALL') {
+        const exists = loaded.some((c: any) => c.id === saved);
+        if (exists) {
+          setSelectedCompanyId(saved);
+        } else {
+          setSelectedCompanyId('ALL');
+          localStorage.setItem('themuno_selected_company_id', 'ALL');
+        }
+      }
     }
     loadCompanies();
 
@@ -74,8 +86,6 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
       setSelectedCompanyId(e.detail || 'ALL');
     };
     window.addEventListener('themuno_company_changed', handleCompanyChange);
-    const saved = localStorage.getItem('themuno_selected_company_id');
-    if (saved) setSelectedCompanyId(saved);
     return () => window.removeEventListener('themuno_company_changed', handleCompanyChange);
   }, []);
 
