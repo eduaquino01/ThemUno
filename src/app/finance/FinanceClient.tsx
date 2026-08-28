@@ -1,0 +1,255 @@
+'use client';
+
+import { useMemo, useState, useTransition } from 'react';
+import { Building2, Upload, RefreshCw, TrendingUp, TrendingDown, Wallet, Scale, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { getFinanceDashboard, importFinancialPlan } from './actions';
+
+type DashboardData = Awaited<ReturnType<typeof getFinanceDashboard>>;
+type Company = { id: string; name: string; code: string; color: string };
+type View = 'dashboard' | 'monthly' | 'categories' | 'entries' | 'import';
+
+const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const blocks = [
+  { nature: 'REVENUE', category: 'Faturamento', start: 8, end: 11 },
+  { nature: 'REVENUE', category: 'Outras Receitas', start: 14, end: 24 },
+  { nature: 'EXPENSE', category: 'Despesas Fixas', start: 28, end: 59 },
+  { nature: 'EXPENSE', category: 'Despesas Variáveis', start: 62, end: 77 },
+  { nature: 'EXPENSE', category: 'Impostos', start: 80, end: 86 },
+  { nature: 'EXPENSE', category: 'Pessoal Fixo', start: 90, end: 102 },
+  { nature: 'EXPENSE', category: 'Pessoal Variável', start: 104, end: 119 },
+  { nature: 'EXPENSE', category: 'Parcelamento', start: 122, end: 123 },
+  { nature: 'EXPENSE', category: 'Mútuo', start: 126, end: 131 },
+  { nature: 'EXPENSE', category: 'Contingência', start: 134, end: 134 },
+] as const;
+
+function KpiCard({ title, value, icon: Icon, tone }: { title: string; value: number; icon: typeof Wallet; tone: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</span>
+        <span className={`rounded-xl p-2 ${tone}`}><Icon className="h-5 w-5" /></span>
+      </div>
+      <p className="mt-4 text-2xl font-black tracking-tight text-white">{money.format(value)}</p>
+    </div>
+  );
+}
+
+function loadSheetJs() {
+  return new Promise<any>((resolve, reject) => {
+    if ((window as any).XLSX) return resolve((window as any).XLSX);
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    script.onload = () => resolve((window as any).XLSX);
+    script.onerror = () => reject(new Error('Não foi possível carregar o leitor de Excel. Verifique sua internet.'));
+    document.head.appendChild(script);
+  });
+}
+
+function parsePeriod(value: unknown, month: number) {
+  const match = String(value || '').match(/(\d{2})[./-]\d{2}\s+a\s+(\d{2})[./-]\d{2}/i);
+  if (!match) return null;
+  const iso = (day: number) => `2026-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { start: iso(Number(match[1])), end: iso(Number(match[2])) };
+}
+
+function parseActualCutoff(title: unknown, month: number) {
+  const match = String(title || '').match(/AT[ÉE]\s+(\d{2})[./-](\d{2})/i);
+  if (!match) return null;
+  return `2026-${String(Number(match[2]) || month).padStart(2, '0')}-${match[1]}`;
+}
+
+function normalizeWorkbook(XLSX: any, workbook: any) {
+  const rows: any[] = [];
+  monthNames.forEach((monthName, monthIndex) => {
+    const sheetName = `${monthName} 2026`;
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
+    const actualCutoff = parseActualCutoff(matrix[0]?.[0], monthIndex + 1);
+    for (let col = 3; col <= 11; col += 2) {
+      const period = parsePeriod(matrix[1]?.[col], monthIndex + 1);
+      if (!period) continue;
+      for (const block of blocks) {
+        for (let rowIndex = block.start - 1; rowIndex <= block.end - 1; rowIndex++) {
+          const account = String(matrix[rowIndex]?.[0] || '').trim();
+          if (!account) continue;
+          ([['PLANNED', 0], ['ACTUAL', 1]] as const).forEach(([scenario, offset]) => {
+            if (scenario === 'ACTUAL' && actualCutoff && period.start > actualCutoff) return;
+            const raw = Number(matrix[rowIndex]?.[col + offset] || 0);
+            const amount = Number.isFinite(raw) ? Math.round(raw * 100) / 100 : 0;
+            if (!amount) return;
+            rows.push({
+              period_start: period.start,
+              period_end: period.end,
+              scenario,
+              nature: block.nature,
+              category: block.category,
+              account,
+              amount: Math.abs(amount),
+              is_internal_transfer: /transferência entre cc/i.test(account),
+            });
+          });
+        }
+      }
+    }
+  });
+  return rows;
+}
+
+export default function FinanceClient({ companies, initialCompanyId, initialData }: {
+  companies: Company[];
+  initialCompanyId: string;
+  initialData: DashboardData;
+}) {
+  const [data, setData] = useState(initialData);
+  const [companyId, setCompanyId] = useState(initialCompanyId);
+  const [view, setView] = useState<View>('dashboard');
+  const [year, setYear] = useState(2026);
+  const [query, setQuery] = useState('');
+  const [monthFilter, setMonthFilter] = useState(0);
+  const [isPending, startTransition] = useTransition();
+  const [importState, setImportState] = useState<{ file?: File; rows: any[]; error?: string; success?: string }>({ rows: [] });
+
+  const reload = (nextCompanyId = companyId, nextYear = year) => startTransition(async () => {
+    setData(await getFinanceDashboard(nextCompanyId, nextYear));
+  });
+  const chooseCompany = (value: string) => {
+    setCompanyId(value);
+    reload(value, year);
+  };
+  const chooseYear = (value: number) => {
+    setYear(value);
+    reload(companyId, value);
+  };
+
+  const filteredEntries = useMemo(() => data.entries.filter((entry) => {
+    const matchesMonth = !monthFilter || new Date(entry.period_start).getUTCMonth() + 1 === monthFilter;
+    const term = query.toLocaleLowerCase('pt-BR');
+    const matchesQuery = !term || `${entry.company} ${entry.category} ${entry.account}`.toLocaleLowerCase('pt-BR').includes(term);
+    return matchesMonth && matchesQuery;
+  }), [data.entries, monthFilter, query]);
+
+  const maxMonth = Math.max(1, ...data.monthly.flatMap((month) => [month.plannedRevenue, month.actualRevenue, month.plannedExpense, month.actualExpense]));
+  const nav: { id: View; label: string }[] = [
+    { id: 'dashboard', label: 'Visão executiva' },
+    { id: 'monthly', label: 'Plano mensal' },
+    { id: 'categories', label: 'Categorias' },
+    { id: 'entries', label: 'Movimentações' },
+    { id: 'import', label: 'Importar Excel' },
+  ];
+
+  async function inspectFile(file: File) {
+    setImportState({ file, rows: [] });
+    try {
+      const XLSX = await loadSheetJs();
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const rows = normalizeWorkbook(XLSX, workbook);
+      if (!rows.length) throw new Error('Não encontrei as abas mensais no padrão “Janeiro 2026”, “Fevereiro 2026” etc.');
+      setImportState({ file, rows });
+    } catch (error: any) {
+      setImportState({ file, rows: [], error: error.message || 'Falha ao analisar o arquivo.' });
+    }
+  }
+
+  function confirmImport() {
+    if (!importState.file || !importState.rows.length || companyId === 'ALL') return;
+    startTransition(async () => {
+      try {
+        const sourceKey = `${companyId}:2026:${importState.file.name}:${importState.file.lastModified}`;
+        const result = await importFinancialPlan({
+          company_id: companyId,
+          file_name: importState.file!.name,
+          source_key: sourceKey,
+          rows: importState.rows,
+          replace_existing: false,
+        });
+        setImportState((state) => ({ ...state, success: `${result.imported_rows} registros importados com sucesso.`, error: undefined }));
+        reload();
+      } catch (error: any) {
+        setImportState((state) => ({ ...state, error: error.message || 'Falha na importação.', success: undefined }));
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-6 text-slate-100">
+      <section className="overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950 via-[#0d1830] to-blue-950/60 p-6 shadow-2xl">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-400">ThemUno Financial Intelligence</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-white">Plano Financeiro Multiempresa</h1>
+            <p className="mt-1 text-sm text-slate-400">Previsto × realizado, categorias, semanas e conciliação em uma única visão.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <select value={companyId} onChange={(event) => chooseCompany(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
+              <option value="ALL">Todas as empresas</option>
+              {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+            </select>
+            <select value={year} onChange={(event) => chooseYear(Number(event.target.value))} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white">
+              {[2025, 2026, 2027].map((item) => <option key={item}>{item}</option>)}
+            </select>
+            <button onClick={() => reload()} className="rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-blue-300 hover:bg-slate-800" title="Atualizar"><RefreshCw className={`h-4 w-4 ${isPending ? 'animate-spin' : ''}`} /></button>
+          </div>
+        </div>
+      </section>
+
+      <nav className="flex gap-2 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60 p-2">
+        {nav.map((item) => <button key={item.id} onClick={() => setView(item.id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-bold transition ${view === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{item.label}</button>)}
+      </nav>
+
+      {view === 'dashboard' && <>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Receitas realizadas" value={data.totals.actualRevenue} icon={TrendingUp} tone="bg-emerald-500/15 text-emerald-400" />
+          <KpiCard title="Despesas realizadas" value={data.totals.actualExpense} icon={TrendingDown} tone="bg-rose-500/15 text-rose-400" />
+          <KpiCard title="Resultado realizado" value={data.totals.actualResult} icon={Scale} tone={data.totals.actualResult >= 0 ? 'bg-blue-500/15 text-blue-400' : 'bg-amber-500/15 text-amber-400'} />
+          <KpiCard title="Saldo calculado" value={data.totals.currentBalance} icon={Wallet} tone="bg-violet-500/15 text-violet-400" />
+        </div>
+        <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <h2 className="font-bold text-white">Evolução mensal — Previsto × Realizado</h2>
+            <div className="mt-6 grid h-72 grid-cols-12 items-end gap-2 border-b border-slate-700 pb-8">
+              {data.monthly.map((month) => <div key={month.month} className="group relative flex h-full items-end justify-center gap-0.5">
+                <div className="w-2 rounded-t bg-blue-500/50" style={{ height: `${Math.max(2, month.plannedRevenue / maxMonth * 100)}%` }} title={`Receita prevista: ${money.format(month.plannedRevenue)}`} />
+                <div className="w-2 rounded-t bg-emerald-400" style={{ height: `${Math.max(2, month.actualRevenue / maxMonth * 100)}%` }} title={`Receita realizada: ${money.format(month.actualRevenue)}`} />
+                <div className="w-2 rounded-t bg-rose-400" style={{ height: `${Math.max(2, month.actualExpense / maxMonth * 100)}%` }} title={`Despesa realizada: ${money.format(month.actualExpense)}`} />
+                <span className="absolute -bottom-6 text-[10px] text-slate-500">{month.label}</span>
+              </div>)}
+            </div>
+            <div className="mt-5 flex flex-wrap gap-4 text-[11px] text-slate-400"><span>■ <b className="text-blue-400">Receita prevista</b></span><span>■ <b className="text-emerald-400">Receita realizada</b></span><span>■ <b className="text-rose-400">Despesa realizada</b></span></div>
+          </section>
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <h2 className="font-bold text-white">Maiores despesas realizadas</h2>
+            <div className="mt-4 space-y-4">{data.categories.filter((item) => item.nature === 'EXPENSE').slice(0, 6).map((item) => {
+              const max = Math.max(...data.categories.map((category) => category.actual), 1);
+              return <div key={item.name}><div className="flex justify-between gap-2 text-xs"><span className="truncate text-slate-300">{item.name}</span><b>{money.format(item.actual)}</b></div><div className="mt-1.5 h-2 rounded-full bg-slate-800"><div className="h-2 rounded-full bg-gradient-to-r from-rose-500 to-orange-400" style={{ width: `${item.actual / max * 100}%` }} /></div></div>;
+            })}</div>
+          </section>
+        </div>
+      </>}
+
+      {view === 'monthly' && <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+        <div className="border-b border-slate-800 p-5"><h2 className="font-bold">Plano mensal de {year}</h2><p className="text-xs text-slate-400">Transferências internas são neutralizadas nos indicadores.</p></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-xs"><thead className="bg-slate-950/60 text-slate-400"><tr>{['Mês','Receita Prev.','Receita Real','Despesa Prev.','Despesa Real','Resultado Prev.','Resultado Real'].map((title) => <th key={title} className="px-4 py-3 text-right first:text-left">{title}</th>)}</tr></thead><tbody>{data.monthly.map((month) => <tr key={month.month} className="border-t border-slate-800/70 hover:bg-slate-800/30"><td className="px-4 py-3 font-bold text-white">{monthNames[month.month - 1]}</td><td className="px-4 py-3 text-right">{money.format(month.plannedRevenue)}</td><td className="px-4 py-3 text-right text-emerald-400">{money.format(month.actualRevenue)}</td><td className="px-4 py-3 text-right">{money.format(month.plannedExpense)}</td><td className="px-4 py-3 text-right text-rose-400">{money.format(month.actualExpense)}</td><td className="px-4 py-3 text-right">{money.format(month.plannedRevenue - month.plannedExpense)}</td><td className={`px-4 py-3 text-right font-bold ${month.actualRevenue - month.actualExpense >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{money.format(month.actualRevenue - month.actualExpense)}</td></tr>)}</tbody></table></div>
+      </section>}
+
+      {view === 'categories' && <section className="grid gap-5 lg:grid-cols-2">{(['REVENUE','EXPENSE'] as const).map((nature) => <div key={nature} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h2 className={`font-bold ${nature === 'REVENUE' ? 'text-emerald-400' : 'text-rose-400'}`}>{nature === 'REVENUE' ? 'Receitas por categoria' : 'Despesas por categoria'}</h2><div className="mt-4 divide-y divide-slate-800">{data.categories.filter((item) => item.nature === nature).map((item) => <div key={item.name} className="grid grid-cols-[1fr_auto_auto] gap-4 py-3 text-xs"><span className="font-semibold text-white">{item.name}</span><span className="text-slate-400">Prev. {money.format(item.planned)}</span><span className="font-bold">Real {money.format(item.actual)}</span></div>)}</div></div>)}</section>}
+
+      {view === 'entries' && <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+        <div className="flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar parceiro, categoria ou empresa" className="w-full rounded-xl border border-slate-700 bg-slate-950 py-2 pl-9 pr-3 text-xs outline-none focus:border-blue-500" /></div><select value={monthFilter} onChange={(event) => setMonthFilter(Number(event.target.value))} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs"><option value={0}>Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></div>
+        <div className="max-h-[620px] overflow-auto"><table className="w-full min-w-[950px] text-[11px]"><thead className="sticky top-0 bg-slate-950 text-slate-400"><tr>{['Período','Empresa','Categoria','Parceiro / Conta','Cenário','Natureza','Valor','Conciliação'].map((title) => <th key={title} className="px-3 py-3 text-left last:text-center">{title}</th>)}</tr></thead><tbody>{filteredEntries.slice(0, 1000).map((entry) => <tr key={entry.id} className="border-t border-slate-800/70"><td className="whitespace-nowrap px-3 py-2">{new Date(entry.period_start).toLocaleDateString('pt-BR')}–{new Date(entry.period_end).toLocaleDateString('pt-BR')}</td><td className="px-3 py-2">{entry.company}</td><td className="px-3 py-2">{entry.category}</td><td className="px-3 py-2 font-semibold text-white">{entry.account}</td><td className="px-3 py-2">{entry.scenario === 'ACTUAL' ? 'Real' : 'Previsto'}</td><td className={entry.nature === 'REVENUE' ? 'px-3 py-2 text-emerald-400' : 'px-3 py-2 text-rose-400'}>{entry.nature === 'REVENUE' ? 'Receita' : 'Despesa'}</td><td className="px-3 py-2 text-right font-bold">{money.format(entry.amount)}</td><td className="px-3 py-2 text-center">{entry.is_reconciled ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-400" /> : '—'}</td></tr>)}</tbody></table></div>
+      </section>}
+
+      {view === 'import' && <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+        <div className="flex items-start gap-3"><span className="rounded-xl bg-blue-500/15 p-3 text-blue-400"><Upload className="h-6 w-6" /></span><div><h2 className="font-bold text-white">Importar Plano financeiro</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Selecione uma empresa e envie a planilha no padrão mensal. O sistema lê as doze abas, separa previsto e realizado e neutraliza transferências entre contas próprias.</p></div></div>
+        {companyId === 'ALL' && <div className="mt-5 flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200"><AlertTriangle className="h-4 w-4 shrink-0" />Selecione uma empresa específica antes de importar.</div>}
+        <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-10 text-center hover:border-blue-500"><Upload className="h-8 w-8 text-blue-400" /><span className="mt-3 text-sm font-bold">Escolher arquivo Excel</span><span className="mt-1 text-xs text-slate-500">.xlsx ou .xls</span><input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => event.target.files?.[0] && inspectFile(event.target.files[0])} /></label>
+        {importState.file && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4 text-xs"><b>{importState.file.name}</b><p className="mt-1 text-slate-400">{importState.rows.length ? `${importState.rows.length} registros reconhecidos.` : 'Analisando ou aguardando correção...'}</p></div>}
+        {importState.error && <p className="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs text-rose-300">{importState.error}</p>}
+        {importState.success && <p className="mt-3 rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-300">{importState.success}</p>}
+        <button disabled={!importState.rows.length || companyId === 'ALL' || isPending} onClick={confirmImport} className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{isPending ? 'Importando...' : 'Confirmar importação'}</button>
+        <div className="mt-8"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Últimas importações</h3><div className="mt-3 divide-y divide-slate-800 rounded-xl border border-slate-800">{data.imports.map((item) => <div key={item.id} className="flex flex-col justify-between gap-2 p-3 text-xs sm:flex-row"><span className="font-semibold text-white">{item.file_name}</span><span className="text-slate-400">{item.imported_rows} registros • {new Date(item.created_at).toLocaleString('pt-BR')}</span></div>)}</div></div>
+      </section>}
+    </div>
+  );
+}
