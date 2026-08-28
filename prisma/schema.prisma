@@ -80,6 +80,23 @@ enum CredentialType {
   OTHER
 }
 
+enum FinancialNature {
+  REVENUE
+  EXPENSE
+}
+
+enum FinancialScenario {
+  PLANNED
+  ACTUAL
+}
+
+enum FinancialImportStatus {
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_WARNINGS
+  FAILED
+}
+
 model Company {
   id          String     @id @default(uuid())
   name        String
@@ -89,6 +106,92 @@ model Company {
   is_holding  Boolean    @default(false)
   created_at  DateTime   @default(now())
   contracts   Contract[]
+  bank_accounts BankAccount[]
+  financial_categories FinancialCategory[]
+  financial_entries FinancialEntry[]
+  financial_imports FinancialImport[]
+}
+
+model BankAccount {
+  id              String   @id @default(uuid())
+  company_id      String
+  company         Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  bank_name       String
+  branch          String?
+  account_number  String?
+  opening_balance Decimal  @default(0)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  entries         FinancialEntry[]
+
+  @@index([company_id])
+}
+
+model FinancialCategory {
+  id          String          @id @default(uuid())
+  company_id  String
+  company     Company         @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  name        String
+  nature      FinancialNature
+  sort_order  Int             @default(0)
+  is_active   Boolean         @default(true)
+  created_at  DateTime        @default(now())
+  updated_at  DateTime        @updatedAt
+  entries     FinancialEntry[]
+
+  @@unique([company_id, nature, name])
+  @@index([company_id, nature])
+}
+
+model FinancialImport {
+  id             String                @id @default(uuid())
+  company_id     String
+  company        Company               @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  file_name      String
+  source_key     String
+  status         FinancialImportStatus @default(PROCESSING)
+  imported_rows  Int                   @default(0)
+  ignored_rows   Int                   @default(0)
+  warning_rows   Int                   @default(0)
+  notes          String?
+  created_at     DateTime              @default(now())
+  entries        FinancialEntry[]
+
+  @@unique([company_id, source_key])
+  @@index([company_id, created_at])
+}
+
+model FinancialEntry {
+  id                   String            @id @default(uuid())
+  company_id           String
+  company              Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  category_id          String
+  category             FinancialCategory @relation(fields: [category_id], references: [id], onDelete: Restrict)
+  bank_account_id      String?
+  bank_account         BankAccount?      @relation(fields: [bank_account_id], references: [id], onDelete: SetNull)
+  import_id            String?
+  import_batch         FinancialImport?  @relation(fields: [import_id], references: [id], onDelete: SetNull)
+  scenario             FinancialScenario
+  nature               FinancialNature
+  account_name         String
+  description          String?
+  document_number      String?
+  period_start         DateTime
+  period_end           DateTime
+  due_date             DateTime?
+  settlement_date      DateTime?
+  amount               Decimal
+  is_internal_transfer Boolean           @default(false)
+  is_reconciled        Boolean           @default(false)
+  source               String            @default("MANUAL")
+  source_ref           String?
+  created_at           DateTime          @default(now())
+  updated_at           DateTime          @updatedAt
+
+  @@index([company_id, period_start, scenario])
+  @@index([company_id, nature, category_id])
+  @@index([import_id])
 }
 
 model Contract {
