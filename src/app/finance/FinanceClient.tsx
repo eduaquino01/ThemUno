@@ -76,9 +76,11 @@ function normalizeWorkbook(XLSX: any, workbook: any) {
           if (!account) continue;
           ([['PLANNED', 0], ['ACTUAL', 1]] as const).forEach(([scenario, offset]) => {
             if (scenario === 'ACTUAL' && actualCutoff && period.start > actualCutoff) return;
-            const raw = Number(matrix[rowIndex]?.[col + offset] || 0);
-            const amount = Number.isFinite(raw) ? Math.round(raw * 100) / 100 : 0;
-            if (!amount) return;
+            const cell = matrix[rowIndex]?.[col + offset];
+            if (cell === null || cell === undefined || cell === '') return;
+            const raw = Number(cell);
+            if (!Number.isFinite(raw)) return;
+            const amount = Math.round(raw * 100) / 100;
             rows.push({
               period_start: period.start,
               period_end: period.end,
@@ -154,17 +156,20 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
 
   function confirmImport() {
     if (!importState.file || !importState.rows.length || companyId === 'ALL') return;
+    const file = importState.file;
     startTransition(async () => {
       try {
-        const sourceKey = `${companyId}:2026:${importState.file.name}:${importState.file.lastModified}`;
+        const sourceKey = `${companyId}:2026:${file.name}:${file.lastModified}`;
         const result = await importFinancialPlan({
           company_id: companyId,
-          file_name: importState.file!.name,
+          file_name: file.name,
           source_key: sourceKey,
           rows: importState.rows,
-          replace_existing: false,
         });
-        setImportState((state) => ({ ...state, success: `${result.imported_rows} registros importados com sucesso.`, error: undefined }));
+        const summary = result.duplicate_file
+          ? `Este mesmo arquivo já havia sido processado. ${result.ignored_rows} registros foram ignorados.`
+          : `${result.imported_rows} novos • ${result.updated_rows} atualizados • ${result.ignored_rows} sem alteração${result.warning_rows ? ` • ${result.warning_rows} avisos` : ''}.`;
+        setImportState((state) => ({ ...state, success: summary, error: undefined }));
         reload();
       } catch (error: any) {
         setImportState((state) => ({ ...state, error: error.message || 'Falha na importação.', success: undefined }));
@@ -241,14 +246,14 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
       </section>}
 
       {view === 'import' && <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-        <div className="flex items-start gap-3"><span className="rounded-xl bg-blue-500/15 p-3 text-blue-400"><Upload className="h-6 w-6" /></span><div><h2 className="font-bold text-white">Importar Plano financeiro</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Selecione uma empresa e envie a planilha no padrão mensal. O sistema lê as doze abas, separa previsto e realizado e neutraliza transferências entre contas próprias.</p></div></div>
+        <div className="flex items-start gap-3"><span className="rounded-xl bg-blue-500/15 p-3 text-blue-400"><Upload className="h-6 w-6" /></span><div><h2 className="font-bold text-white">Importar Plano financeiro</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Envie a planilha completa ou apenas as abas mensais que foram atualizadas. O sistema adiciona registros novos, atualiza valores alterados, ignora os iguais e não apaga períodos ausentes.</p></div></div>
         {companyId === 'ALL' && <div className="mt-5 flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200"><AlertTriangle className="h-4 w-4 shrink-0" />Selecione uma empresa específica antes de importar.</div>}
         <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-10 text-center hover:border-blue-500"><Upload className="h-8 w-8 text-blue-400" /><span className="mt-3 text-sm font-bold">Escolher arquivo Excel</span><span className="mt-1 text-xs text-slate-500">.xlsx ou .xls</span><input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => event.target.files?.[0] && inspectFile(event.target.files[0])} /></label>
         {importState.file && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4 text-xs"><b>{importState.file.name}</b><p className="mt-1 text-slate-400">{importState.rows.length ? `${importState.rows.length} registros reconhecidos.` : 'Analisando ou aguardando correção...'}</p></div>}
         {importState.error && <p className="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs text-rose-300">{importState.error}</p>}
         {importState.success && <p className="mt-3 rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-300">{importState.success}</p>}
         <button disabled={!importState.rows.length || companyId === 'ALL' || isPending} onClick={confirmImport} className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{isPending ? 'Importando...' : 'Confirmar importação'}</button>
-        <div className="mt-8"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Últimas importações</h3><div className="mt-3 divide-y divide-slate-800 rounded-xl border border-slate-800">{data.imports.map((item) => <div key={item.id} className="flex flex-col justify-between gap-2 p-3 text-xs sm:flex-row"><span className="font-semibold text-white">{item.file_name}</span><span className="text-slate-400">{item.imported_rows} registros • {new Date(item.created_at).toLocaleString('pt-BR')}</span></div>)}</div></div>
+        <div className="mt-8"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Últimas importações</h3><div className="mt-3 divide-y divide-slate-800 rounded-xl border border-slate-800">{data.imports.map((item) => <div key={item.id} className="flex flex-col justify-between gap-2 p-3 text-xs sm:flex-row"><span className="font-semibold text-white">{item.file_name}</span><span className="text-slate-400">{item.imported_rows} novos • {item.updated_rows} atualizados • {item.ignored_rows} ignorados • {new Date(item.created_at).toLocaleString('pt-BR')}</span></div>)}</div></div>
       </section>}
     </div>
   );
