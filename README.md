@@ -4,7 +4,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ### Módulo financeiro
 
-O menu **Financeiro** oferece visão multiempresa do plano financeiro, comparação entre previsto e realizado, detalhamento por categoria/parceiro e importação das abas mensais do Excel. Dados financeiros reais não são mantidos no repositório; carregue a planilha pela tela de importação depois de preparar o banco.
+O menu **Financeiro** oferece visão multiempresa do plano financeiro, comparação entre previsto e realizado, detalhamento por categoria/parceiro e importação incremental das abas mensais do Excel. A importação aceita a planilha completa ou somente as abas atualizadas: adiciona linhas novas, atualiza valores alterados, ignora registros iguais e nunca exclui períodos que não estejam no arquivo. Dados financeiros reais não são mantidos no repositório; carregue a planilha pela tela de importação depois de preparar o banco.
 
 Para preparar o banco local:
 
