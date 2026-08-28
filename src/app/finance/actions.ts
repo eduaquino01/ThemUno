@@ -20,10 +20,31 @@ const ImportSchema = z.object({
   file_name: z.string().min(1).max(255),
   source_key: z.string().min(3).max(180),
   rows: z.array(ImportRowSchema).min(1).max(10000),
-  replace_existing: z.boolean().default(false),
 });
 
 const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+type ImportRow = z.infer<typeof ImportRowSchema>;
+
+function normalizeIdentityPart(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('pt-BR');
+}
+
+function entryIdentity(row: Pick<ImportRow, 'period_start' | 'period_end' | 'scenario' | 'nature' | 'category' | 'account'>) {
+  return [
+    row.period_start,
+    row.period_end,
+    row.scenario,
+    row.nature,
+    normalizeIdentityPart(row.category),
+    normalizeIdentityPart(row.account),
+  ].join('::');
+}
 
 export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', year = 2026) {
   const start = new Date(`${year}-01-01T00:00:00.000Z`);
@@ -131,15 +152,18 @@ export async function importFinancialPlan(input: unknown) {
   const existing = await prisma.financialImport.findUnique({
     where: { company_id_source_key: { company_id: data.company_id, source_key: data.source_key } },
   });
-  if (existing && !data.replace_existing) {
-    throw new Error('Esta versão da planilha já foi importada. Marque “substituir” para reprocessá-la.');
+  if (existing) {
+    return {
+      id: existing.id,
+      imported_rows: 0,
+      updated_rows: 0,
+      ignored_rows: data.rows.length,
+      warning_rows: existing.warning_rows,
+      duplicate_file: true,
+    };
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    if (existing) {
-      await tx.financialEntry.deleteMany({ where: { import_id: existing.id } });
-      await tx.financialImport.delete({ where: { id: existing.id } });
-    }
     const batch = await tx.financialImport.create({
       data: {
         company_id: data.company_id,
@@ -159,10 +183,45 @@ export async function importFinancialPlan(input: unknown) {
     }
     const categories = await tx.financialCategory.findMany({ where: { company_id: data.company_id } });
     const categoryByKey = new Map(categories.map((item) => [`${item.nature}::${item.name}`, item.id]));
-    await tx.financialEntry.createMany({
-      data: data.rows.map((row, index) => ({
+
+    const currentEntries = await tx.financialEntry.findMany({
+      where: { company_id: data.company_id },
+      include: { category: { select: { name: true } } },
+      orderBy: { created_at: 'asc' },
+    });
+    const currentByIdentity = new Map<string, (typeof currentEntries)[number]>();
+    let legacyDuplicateRows = 0;
+    for (const entry of currentEntries) {
+      const identity = entryIdentity({
+        period_start: entry.period_start.toISOString().slice(0, 10),
+        period_end: entry.period_end.toISOString().slice(0, 10),
+        scenario: entry.scenario,
+        nature: entry.nature,
+        category: entry.category.name,
+        account: entry.account_name,
+      });
+      if (currentByIdentity.has(identity)) legacyDuplicateRows += 1;
+      else currentByIdentity.set(identity, entry);
+    }
+
+    const uniqueRows = new Map<string, { row: ImportRow; sourceIndex: number }>();
+    let duplicateInputRows = 0;
+    data.rows.forEach((row, index) => {
+      const identity = entryIdentity(row);
+      if (uniqueRows.has(identity)) duplicateInputRows += 1;
+      uniqueRows.set(identity, { row, sourceIndex: index + 1 });
+    });
+
+    const rowsToCreate = [];
+    let updatedRows = 0;
+    let ignoredRows = duplicateInputRows;
+    for (const [identity, { row, sourceIndex }] of uniqueRows) {
+      const current = currentByIdentity.get(identity);
+      const categoryId = categoryByKey.get(`${row.nature}::${row.category}`)!;
+      if (!current) {
+        rowsToCreate.push({
         company_id: data.company_id,
-        category_id: categoryByKey.get(`${row.nature}::${row.category}`)!,
+          category_id: categoryId,
         import_id: batch.id,
         scenario: row.scenario,
         nature: row.nature,
@@ -173,14 +232,61 @@ export async function importFinancialPlan(input: unknown) {
         is_internal_transfer: row.is_internal_transfer,
         is_reconciled: row.scenario === 'ACTUAL',
         source: 'EXCEL',
-        source_ref: `${data.source_key}:${index + 1}`,
-      })),
-    });
+          source_ref: `${data.source_key}:${sourceIndex}`,
+        });
+        continue;
+      }
+
+      const amountChanged = Math.round(Number(current.amount) * 100) !== Math.round(row.amount * 100);
+      const metadataChanged = current.is_internal_transfer !== row.is_internal_transfer
+        || current.is_reconciled !== (row.scenario === 'ACTUAL')
+        || current.category_id !== categoryId;
+      if (!amountChanged && !metadataChanged) {
+        ignoredRows += 1;
+        continue;
+      }
+
+      await tx.financialEntry.update({
+        where: { id: current.id },
+        data: {
+          category_id: categoryId,
+          import_id: batch.id,
+          account_name: row.account,
+          amount: row.amount,
+          is_internal_transfer: row.is_internal_transfer,
+          is_reconciled: row.scenario === 'ACTUAL',
+          source: 'EXCEL',
+          source_ref: `${data.source_key}:${sourceIndex}`,
+        },
+      });
+      updatedRows += 1;
+    }
+
+    if (rowsToCreate.length) {
+      await tx.financialEntry.createMany({ data: rowsToCreate });
+    }
+    const warningRows = duplicateInputRows + legacyDuplicateRows;
     return tx.financialImport.update({
       where: { id: batch.id },
-      data: { status: 'COMPLETED', imported_rows: data.rows.length },
+      data: {
+        status: warningRows ? 'COMPLETED_WITH_WARNINGS' : 'COMPLETED',
+        imported_rows: rowsToCreate.length,
+        updated_rows: updatedRows,
+        ignored_rows: ignoredRows,
+        warning_rows: warningRows,
+        notes: warningRows
+          ? `${duplicateInputRows} linha(s) repetida(s) no arquivo; ${legacyDuplicateRows} duplicidade(s) anterior(es) preservada(s).`
+          : null,
+      },
     });
   });
   revalidatePath('/finance');
-  return { id: result.id, imported_rows: result.imported_rows };
+  return {
+    id: result.id,
+    imported_rows: result.imported_rows,
+    updated_rows: result.updated_rows,
+    ignored_rows: result.ignored_rows,
+    warning_rows: result.warning_rows,
+    duplicate_file: false,
+  };
 }
