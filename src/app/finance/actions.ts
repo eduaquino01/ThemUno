@@ -13,6 +13,11 @@ const ImportRowSchema = z.object({
   account: z.string().min(1).max(220),
   amount: z.number().finite().nonnegative(),
   is_internal_transfer: z.boolean().default(false),
+  description: z.string().max(2000).optional(),
+  document_number: z.string().max(120).optional(),
+  due_date: z.string().min(10).optional(),
+  settlement_date: z.string().min(10).optional(),
+  source_ref: z.string().max(180).optional(),
 });
 
 const ImportSchema = z.object({
@@ -159,28 +164,50 @@ export async function importFinancialPlan(input: unknown) {
     }
     const categories = await tx.financialCategory.findMany({ where: { company_id: data.company_id } });
     const categoryByKey = new Map(categories.map((item) => [`${item.nature}::${item.name}`, item.id]));
+    const suppliedRefs = data.rows.flatMap((row) => row.source_ref ? [row.source_ref] : []);
+    const existingRefs = suppliedRefs.length ? await tx.financialEntry.findMany({
+      where: { company_id: data.company_id, source_ref: { in: suppliedRefs } },
+      select: { source_ref: true },
+    }) : [];
+    const knownRefs = new Set(existingRefs.flatMap((item) => item.source_ref ? [item.source_ref] : []));
+    const incomingRefs = new Set<string>();
+    const newRows = data.rows.filter((row) => {
+      if (!row.source_ref) return true;
+      if (knownRefs.has(row.source_ref) || incomingRefs.has(row.source_ref)) return false;
+      incomingRefs.add(row.source_ref);
+      return true;
+    });
     await tx.financialEntry.createMany({
-      data: data.rows.map((row, index) => ({
+      data: newRows.map((row, index) => ({
         company_id: data.company_id,
         category_id: categoryByKey.get(`${row.nature}::${row.category}`)!,
         import_id: batch.id,
         scenario: row.scenario,
         nature: row.nature,
         account_name: row.account,
+        description: row.description,
+        document_number: row.document_number,
         period_start: new Date(`${row.period_start}T12:00:00.000Z`),
         period_end: new Date(`${row.period_end}T12:00:00.000Z`),
+        due_date: row.due_date ? new Date(`${row.due_date}T12:00:00.000Z`) : null,
+        settlement_date: row.settlement_date ? new Date(`${row.settlement_date}T12:00:00.000Z`) : null,
         amount: row.amount,
         is_internal_transfer: row.is_internal_transfer,
         is_reconciled: row.scenario === 'ACTUAL',
-        source: 'EXCEL',
-        source_ref: `${data.source_key}:${index + 1}`,
+        source: row.source_ref?.startsWith('SANKHYA:') ? 'SANKHYA_EXCEL' : 'EXCEL',
+        source_ref: row.source_ref || `${data.source_key}:${index + 1}`,
       })),
     });
     return tx.financialImport.update({
       where: { id: batch.id },
-      data: { status: 'COMPLETED', imported_rows: data.rows.length },
+      data: {
+        status: newRows.length < data.rows.length ? 'COMPLETED_WITH_WARNINGS' : 'COMPLETED',
+        imported_rows: newRows.length,
+        ignored_rows: data.rows.length - newRows.length,
+        notes: newRows.length < data.rows.length ? 'Registros duplicados foram ignorados.' : null,
+      },
     });
   });
   revalidatePath('/finance');
-  return { id: result.id, imported_rows: result.imported_rows };
+  return { id: result.id, imported_rows: result.imported_rows, ignored_rows: result.ignored_rows };
 }
