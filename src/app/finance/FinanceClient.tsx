@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { Building2, Upload, RefreshCw, TrendingUp, TrendingDown, Wallet, Scale, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { getFinanceDashboard, importFinancialPlan } from './actions';
+import { inferCompanyCode, normalizeWorkbook, type ImportFormat } from './importers';
 
 type DashboardData = Awaited<ReturnType<typeof getFinanceDashboard>>;
 type Company = { id: string; name: string; code: string; color: string };
@@ -10,18 +11,6 @@ type View = 'dashboard' | 'monthly' | 'categories' | 'entries' | 'import';
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-const blocks = [
-  { nature: 'REVENUE', category: 'Faturamento', start: 8, end: 11 },
-  { nature: 'REVENUE', category: 'Outras Receitas', start: 14, end: 24 },
-  { nature: 'EXPENSE', category: 'Despesas Fixas', start: 28, end: 59 },
-  { nature: 'EXPENSE', category: 'Despesas Variáveis', start: 62, end: 77 },
-  { nature: 'EXPENSE', category: 'Impostos', start: 80, end: 86 },
-  { nature: 'EXPENSE', category: 'Pessoal Fixo', start: 90, end: 102 },
-  { nature: 'EXPENSE', category: 'Pessoal Variável', start: 104, end: 119 },
-  { nature: 'EXPENSE', category: 'Parcelamento', start: 122, end: 123 },
-  { nature: 'EXPENSE', category: 'Mútuo', start: 126, end: 131 },
-  { nature: 'EXPENSE', category: 'Contingência', start: 134, end: 134 },
-] as const;
 
 function KpiCard({ title, value, icon: Icon, tone }: { title: string; value: number; icon: typeof Wallet; tone: string }) {
   return (
@@ -46,57 +35,6 @@ function loadSheetJs() {
   });
 }
 
-function parsePeriod(value: unknown, month: number) {
-  const match = String(value || '').match(/(\d{2})[./-]\d{2}\s+a\s+(\d{2})[./-]\d{2}/i);
-  if (!match) return null;
-  const iso = (day: number) => `2026-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  return { start: iso(Number(match[1])), end: iso(Number(match[2])) };
-}
-
-function parseActualCutoff(title: unknown, month: number) {
-  const match = String(title || '').match(/AT[ÉE]\s+(\d{2})[./-](\d{2})/i);
-  if (!match) return null;
-  return `2026-${String(Number(match[2]) || month).padStart(2, '0')}-${match[1]}`;
-}
-
-function normalizeWorkbook(XLSX: any, workbook: any) {
-  const rows: any[] = [];
-  monthNames.forEach((monthName, monthIndex) => {
-    const sheetName = `${monthName} 2026`;
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) return;
-    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
-    const actualCutoff = parseActualCutoff(matrix[0]?.[0], monthIndex + 1);
-    for (let col = 3; col <= 11; col += 2) {
-      const period = parsePeriod(matrix[1]?.[col], monthIndex + 1);
-      if (!period) continue;
-      for (const block of blocks) {
-        for (let rowIndex = block.start - 1; rowIndex <= block.end - 1; rowIndex++) {
-          const account = String(matrix[rowIndex]?.[0] || '').trim();
-          if (!account) continue;
-          ([['PLANNED', 0], ['ACTUAL', 1]] as const).forEach(([scenario, offset]) => {
-            if (scenario === 'ACTUAL' && actualCutoff && period.start > actualCutoff) return;
-            const raw = Number(matrix[rowIndex]?.[col + offset] || 0);
-            const amount = Number.isFinite(raw) ? Math.round(raw * 100) / 100 : 0;
-            if (!amount) return;
-            rows.push({
-              period_start: period.start,
-              period_end: period.end,
-              scenario,
-              nature: block.nature,
-              category: block.category,
-              account,
-              amount: Math.abs(amount),
-              is_internal_transfer: /transferência entre cc/i.test(account),
-            });
-          });
-        }
-      }
-    }
-  });
-  return rows;
-}
-
 export default function FinanceClient({ companies, initialCompanyId, initialData }: {
   companies: Company[];
   initialCompanyId: string;
@@ -109,7 +47,7 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
   const [query, setQuery] = useState('');
   const [monthFilter, setMonthFilter] = useState(0);
   const [isPending, startTransition] = useTransition();
-  const [importState, setImportState] = useState<{ file?: File; rows: any[]; error?: string; success?: string }>({ rows: [] });
+  const [importState, setImportState] = useState<{ file?: File; rows: any[]; format?: ImportFormat; error?: string; success?: string }>({ rows: [] });
 
   const reload = (nextCompanyId = companyId, nextYear = year) => startTransition(async () => {
     setData(await getFinanceDashboard(nextCompanyId, nextYear));
@@ -144,9 +82,11 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
     try {
       const XLSX = await loadSheetJs();
       const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-      const rows = normalizeWorkbook(XLSX, workbook);
-      if (!rows.length) throw new Error('Não encontrei as abas mensais no padrão “Janeiro 2026”, “Fevereiro 2026” etc.');
-      setImportState({ file, rows });
+      const normalized = normalizeWorkbook(XLSX, workbook);
+      const suggestedCode = inferCompanyCode(file.name);
+      const suggestedCompany = companies.find((company) => company.code === suggestedCode);
+      if (suggestedCompany && suggestedCompany.id !== companyId) chooseCompany(suggestedCompany.id);
+      setImportState({ file, ...normalized });
     } catch (error: any) {
       setImportState({ file, rows: [], error: error.message || 'Falha ao analisar o arquivo.' });
     }
@@ -164,7 +104,8 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
           rows: importState.rows,
           replace_existing: false,
         });
-        setImportState((state) => ({ ...state, success: `${result.imported_rows} registros importados com sucesso.`, error: undefined }));
+        const ignored = result.ignored_rows ? ` ${result.ignored_rows} duplicados foram ignorados.` : '';
+        setImportState((state) => ({ ...state, success: `${result.imported_rows} registros importados com sucesso.${ignored}`, error: undefined }));
         reload();
       } catch (error: any) {
         setImportState((state) => ({ ...state, error: error.message || 'Falha na importação.', success: undefined }));
@@ -241,10 +182,10 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
       </section>}
 
       {view === 'import' && <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-        <div className="flex items-start gap-3"><span className="rounded-xl bg-blue-500/15 p-3 text-blue-400"><Upload className="h-6 w-6" /></span><div><h2 className="font-bold text-white">Importar Plano financeiro</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Selecione uma empresa e envie a planilha no padrão mensal. O sistema lê as doze abas, separa previsto e realizado e neutraliza transferências entre contas próprias.</p></div></div>
+        <div className="flex items-start gap-3"><span className="rounded-xl bg-blue-500/15 p-3 text-blue-400"><Upload className="h-6 w-6" /></span><div><h2 className="font-bold text-white">Importar dados financeiros</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Envie o Plano Financeiro mensal ou o relatório “Movimentação Financeira” exportado do Sankhya. No Sankhya, títulos baixados entram como realizado e títulos em aberto como previsto.</p></div></div>
         {companyId === 'ALL' && <div className="mt-5 flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200"><AlertTriangle className="h-4 w-4 shrink-0" />Selecione uma empresa específica antes de importar.</div>}
         <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-10 text-center hover:border-blue-500"><Upload className="h-8 w-8 text-blue-400" /><span className="mt-3 text-sm font-bold">Escolher arquivo Excel</span><span className="mt-1 text-xs text-slate-500">.xlsx ou .xls</span><input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => event.target.files?.[0] && inspectFile(event.target.files[0])} /></label>
-        {importState.file && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4 text-xs"><b>{importState.file.name}</b><p className="mt-1 text-slate-400">{importState.rows.length ? `${importState.rows.length} registros reconhecidos.` : 'Analisando ou aguardando correção...'}</p></div>}
+        {importState.file && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4 text-xs"><b>{importState.file.name}</b><p className="mt-1 text-slate-400">{importState.rows.length ? `${importState.rows.length} registros reconhecidos • ${importState.format === 'SANKHYA' ? 'Movimentação Financeira Sankhya' : 'Plano Financeiro mensal'}. Confirme a empresa selecionada antes de importar.` : 'Analisando ou aguardando correção...'}</p></div>}
         {importState.error && <p className="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs text-rose-300">{importState.error}</p>}
         {importState.success && <p className="mt-3 rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-300">{importState.success}</p>}
         <button disabled={!importState.rows.length || companyId === 'ALL' || isPending} onClick={confirmImport} className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{isPending ? 'Importando...' : 'Confirmar importação'}</button>
