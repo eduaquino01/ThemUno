@@ -2,6 +2,19 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Módulo financeiro
+
+O menu **Financeiro** oferece visão multiempresa do plano financeiro, comparação entre previsto e realizado, detalhamento por categoria/parceiro e importação das abas mensais do Excel. Dados financeiros reais não são mantidos no repositório; carregue a planilha pela tela de importação depois de preparar o banco.
+
+Para preparar o banco local:
+
+```bash
+npx prisma migrate deploy
+npx prisma db seed
+```
+
+Transferências entre contas próprias são armazenadas para rastreabilidade, mas neutralizadas nos KPIs econômicos. Antes de uso externo, implemente autenticação e autorização por empresa.
+
 First, run the development server:
 
 ```bash
