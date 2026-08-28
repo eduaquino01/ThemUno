@@ -11,6 +11,7 @@ import {
   ClipboardList,
   UserCheck,
   Sparkles,
+  Landmark,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -56,6 +57,12 @@ export default function SidebarNav() {
       label: 'Faturamento',
       icon: CreditCard,
       badgeBg: 'bg-emerald-500/20 text-emerald-300',
+    },
+    {
+      href: '/finance',
+      label: 'Financeiro',
+      icon: Landmark,
+      badgeBg: 'bg-cyan-500/20 text-cyan-300',
     },
     {
       href: '/reports',
