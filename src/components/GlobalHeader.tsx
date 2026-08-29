@@ -158,7 +158,7 @@ export default function GlobalHeader() {
           >
             <Bell className="w-4 h-4 text-slate-300" />
             {totalNotifications > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[9px] font-extrabold flex items-center justify-center animate-bounce shadow-md">
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[10px] font-extrabold flex items-center justify-center animate-bounce shadow-md">
                 {totalNotifications}
               </span>
             )}

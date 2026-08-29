@@ -21,6 +21,7 @@ import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { useToast } from '@/components/ui/ToastProvider';
 
 interface BillingClientProps {
   initialContracts: any[];
@@ -32,6 +33,7 @@ export default function BillingClient({
   initialInvoices 
 }: BillingClientProps) {
   const router = useRouter();
+  const toast = useToast();
   const [isPending, startTransition] = useTransition();
   const [activeTab, setActiveTab] = useState<'validation' | 'invoices'>('validation');
 
@@ -111,7 +113,7 @@ export default function BillingClient({
         await updateInvoiceStatus(invId, 'PAID', 'https://storage.googleapis.com/clms-invoices/proofs/recibo-gerado.pdf');
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao registrar pagamento.');
+        toast.error(err.message || 'Erro ao registrar pagamento.');
       }
     });
   };
@@ -132,7 +134,7 @@ export default function BillingClient({
         setShowDisputeModal(false);
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao registrar glosa.');
+        toast.error(err.message || 'Erro ao registrar glosa.');
       }
     });
   };
@@ -199,7 +201,7 @@ export default function BillingClient({
                           </td>
                           <td className="px-6 py-4 text-gray-300">
                             <div className="font-semibold text-white">{m.title}</div>
-                            <div className="text-[10px] text-gray-400 mt-0.5">Prazo: {formatDate(m.due_date)}</div>
+                            <div className="text-xs text-gray-400 mt-0.5">Prazo: {formatDate(m.due_date)}</div>
                           </td>
                           <td className="px-6 py-4 font-bold text-white">
                             {formatCurrency(m.billing_value)}
@@ -305,7 +307,7 @@ export default function BillingClient({
                         {formatDate(inv.issue_date)} / {formatDate(inv.due_date)}
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold uppercase border ${
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold uppercase border ${
                           inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                           inv.status === 'ISSUED' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
                           inv.status === 'DISPUTED' ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
@@ -387,7 +389,7 @@ export default function BillingClient({
                   type="text" required
                   value={formData.invoice_number}
                   onChange={(e) => setFormData({ ...formData, invoice_number: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -399,7 +401,7 @@ export default function BillingClient({
                     type="date" required
                     value={formData.issue_date}
                     onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -408,7 +410,7 @@ export default function BillingClient({
                     type="date" required
                     value={formData.due_date}
                     onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -450,7 +452,7 @@ export default function BillingClient({
                   placeholder="Ex: Desvio de SLA contratual ou divergência material no cálculo de entregas..."
                   value={disputeReason}
                   onChange={(e) => setDisputeReason(e.target.value)}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-24"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-24"
                 />
               </div>
 

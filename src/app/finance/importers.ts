@@ -30,17 +30,33 @@ const blocks = [
   { nature: 'EXPENSE', category: 'Contingência', start: 134, end: 134 },
 ] as const;
 
-function parsePeriod(value: unknown, month: number) {
+function parsePeriod(value: unknown, month: number, year: number) {
   const match = String(value || '').match(/(\d{2})[./-]\d{2}\s+a\s+(\d{2})[./-]\d{2}/i);
   if (!match) return null;
-  const iso = (day: number) => `2026-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const iso = (day: number) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return { start: iso(Number(match[1])), end: iso(Number(match[2])) };
 }
 
-function parseActualCutoff(title: unknown, month: number) {
+function parseActualCutoff(title: unknown, month: number, year: number) {
   const match = String(title || '').match(/AT[ÉE]\s+(\d{2})[./-](\d{2})/i);
   if (!match) return null;
-  return `2026-${String(Number(match[2]) || month).padStart(2, '0')}-${match[1]}`;
+  return `${year}-${String(Number(match[2]) || month).padStart(2, '0')}-${match[1]}`;
+}
+
+// Localiza, entre as abas do arquivo, a que corresponde a um mês do Plano
+// Financeiro (ex.: "Janeiro 2026", "Janeiro 2027", ...) e devolve o ano
+// encontrado no próprio nome da aba — em vez de assumir um ano fixo no
+// código, o que faria o importador parar de reconhecer arquivos assim que
+// o ano mudasse.
+function findMonthSheet(workbook: any, monthName: string): { sheet: any; year: number } | null {
+  const pattern = new RegExp(`^${monthName}\\s+(\\d{4})$`, 'i');
+  for (const sheetName of workbook.SheetNames as string[]) {
+    const match = sheetName.match(pattern);
+    if (match) {
+      return { sheet: workbook.Sheets[sheetName], year: Number(match[1]) };
+    }
+  }
+  return null;
 }
 
 function normalizeHeader(value: unknown) {
@@ -74,6 +90,26 @@ function stableHash(value: string) {
   return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+// Identidade de uma importação baseada no CONTEÚDO das linhas já normalizadas,
+// não no nome/data de modificação do arquivo. Isso evita que reabrir e salvar
+// a mesma planilha (o que só muda o lastModified do arquivo, não os dados)
+// seja tratado como uma versão nova — e, ao mesmo tempo, detecta corretamente
+// como "nova versão" um arquivo com o mesmo nome mas conteúdo diferente.
+export function hashImportRows(rows: FinancialImportRow[]): string {
+  const sorted = [...rows].sort((a, b) => {
+    const keyA = `${a.period_start}|${a.scenario}|${a.nature}|${a.category}|${a.account}|${a.amount}`;
+    const keyB = `${b.period_start}|${b.scenario}|${b.nature}|${b.category}|${b.account}|${b.amount}`;
+    return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
+  });
+  const serialized = sorted
+    .map((row) => [
+      row.period_start, row.period_end, row.scenario, row.nature, row.category,
+      row.account, row.amount, row.is_internal_transfer ? 1 : 0, row.source_ref || '',
+    ].join('|'))
+    .join('\n');
+  return stableHash(serialized);
+}
+
 export function inferCompanyCode(fileName: string) {
   const normalized = normalizeHeader(fileName);
   if (normalized.startsWith('aba')) return 'ABA-BLOCK';
@@ -83,16 +119,51 @@ export function inferCompanyCode(fileName: string) {
   return undefined;
 }
 
-function normalizeFinancialPlan(XLSX: any, workbook: any): FinancialImportRow[] {
+// O layout do Plano Financeiro é fixo (cada categoria vive numa faixa de
+// linhas hardcoded em `blocks`). Isso é rápido de ler, mas silencioso quando
+// alguém reorganiza uma aba: se "Despesas Fixas" deixar de estar na linha 27,
+// o código simplesmente para de encontrar contas ali e nenhuma linha daquela
+// categoria é importada, sem erro nenhum. Esta checagem compara o texto que
+// deveria estar logo acima de cada bloco (ex.: "Despesas Fixas" na linha 27,
+// um acima do bloco que começa na 28) com o nome esperado da categoria, e
+// devolve um aviso legível sempre que não bater — o parser continua tentando
+// ler o bloco normalmente (o layout pode ter mudado só o rótulo, não as
+// linhas), mas quem importa passa a ver claramente que aquela categoria
+// pode estar errada ou vazia, em vez de descobrir isso só ao conferir os
+// números depois.
+function blockHeaderMatches(headerCell: unknown, category: string) {
+  const normalizedHeader = normalizeHeader(headerCell);
+  if (!normalizedHeader) return false;
+  const normalizedCategory = normalizeHeader(category);
+  return normalizedHeader.includes(normalizedCategory) || normalizedCategory.includes(normalizedHeader);
+}
+
+function normalizeFinancialPlan(XLSX: any, workbook: any): { rows: FinancialImportRow[]; warnings: string[] } {
   const rows: FinancialImportRow[] = [];
+  const warnings: string[] = [];
   monthNames.forEach((monthName, monthIndex) => {
-    const sheet = workbook.Sheets[`${monthName} 2026`];
-    if (!sheet) return;
+    const found = findMonthSheet(workbook, monthName);
+    if (!found) return;
+    const { sheet, year } = found;
+    const sheetLabel = `${monthName} ${year}`;
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
-    const actualCutoff = parseActualCutoff(matrix[0]?.[0], monthIndex + 1);
+    const actualCutoff = parseActualCutoff(matrix[0]?.[0], monthIndex + 1, year);
+
+    for (const block of blocks) {
+      const headerCell = matrix[block.start - 2]?.[0];
+      if (!blockHeaderMatches(headerCell, block.category)) {
+        const actualHeader = String(headerCell || '(vazio)').trim();
+        warnings.push(
+          `Aba "${sheetLabel}": esperava a categoria "${block.category}" na linha ${block.start - 1}, mas encontrei "${actualHeader}". Confira se essa categoria foi importada corretamente ou se a planilha mudou de layout.`
+        );
+      }
+    }
+
+    let periodsFound = 0;
     for (let col = 3; col <= 11; col += 2) {
-      const period = parsePeriod(matrix[1]?.[col], monthIndex + 1);
+      const period = parsePeriod(matrix[1]?.[col], monthIndex + 1, year);
       if (!period) continue;
+      periodsFound += 1;
       for (const block of blocks) {
         for (let rowIndex = block.start - 1; rowIndex <= block.end - 1; rowIndex++) {
           const account = String(matrix[rowIndex]?.[0] || '').trim();
@@ -107,8 +178,11 @@ function normalizeFinancialPlan(XLSX: any, workbook: any): FinancialImportRow[] 
         }
       }
     }
+    if (periodsFound === 0) {
+      warnings.push(`Aba "${sheetLabel}": não encontrei nenhum período válido na linha 2 (ex.: "01.01 a 06.01"). Nenhum lançamento foi importado deste mês.`);
+    }
   });
-  return rows;
+  return { rows, warnings };
 }
 
 function normalizeSankhya(XLSX: any, workbook: any): FinancialImportRow[] {
@@ -159,10 +233,10 @@ function normalizeSankhya(XLSX: any, workbook: any): FinancialImportRow[] {
   return rows;
 }
 
-export function normalizeWorkbook(XLSX: any, workbook: any): { rows: FinancialImportRow[]; format: ImportFormat } {
-  const financialPlanRows = normalizeFinancialPlan(XLSX, workbook);
-  if (financialPlanRows.length) return { rows: financialPlanRows, format: 'FINANCIAL_PLAN' };
+export function normalizeWorkbook(XLSX: any, workbook: any): { rows: FinancialImportRow[]; format: ImportFormat; warnings: string[] } {
+  const financialPlan = normalizeFinancialPlan(XLSX, workbook);
+  if (financialPlan.rows.length) return { rows: financialPlan.rows, format: 'FINANCIAL_PLAN', warnings: financialPlan.warnings };
   const sankhyaRows = normalizeSankhya(XLSX, workbook);
-  if (sankhyaRows.length) return { rows: sankhyaRows, format: 'SANKHYA' };
+  if (sankhyaRows.length) return { rows: sankhyaRows, format: 'SANKHYA', warnings: [] };
   throw new Error('Formato não reconhecido. Envie o Plano Financeiro mensal ou o relatório “Movimentação Financeira” do Sankhya.');
 }

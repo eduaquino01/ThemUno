@@ -30,7 +30,7 @@ const ImportSchema = z.object({
 
 const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', year = 2026) {
+export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', year = new Date().getFullYear()) {
   const start = new Date(`${year}-01-01T00:00:00.000Z`);
   const end = new Date(`${year + 1}-01-01T00:00:00.000Z`);
   const where = {

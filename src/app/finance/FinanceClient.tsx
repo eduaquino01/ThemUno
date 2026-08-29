@@ -3,7 +3,10 @@
 import { useMemo, useState, useTransition } from 'react';
 import { Building2, Upload, RefreshCw, TrendingUp, TrendingDown, Wallet, Scale, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { getFinanceDashboard, importFinancialPlan } from './actions';
-import { inferCompanyCode, normalizeWorkbook, type ImportFormat } from './importers';
+import { inferCompanyCode, normalizeWorkbook, hashImportRows, type ImportFormat } from './importers';
+import Pagination from '@/components/ui/Pagination';
+
+const ENTRIES_PAGE_SIZE = 100;
 
 type DashboardData = Awaited<ReturnType<typeof getFinanceDashboard>>;
 type Company = { id: string; name: string; code: string; color: string };
@@ -11,6 +14,8 @@ type View = 'dashboard' | 'monthly' | 'categories' | 'entries' | 'import';
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const CURRENT_YEAR = new Date().getFullYear();
+const SELECTABLE_YEARS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1];
 
 function KpiCard({ title, value, icon: Icon, tone }: { title: string; value: number; icon: typeof Wallet; tone: string }) {
   return (
@@ -43,21 +48,24 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
   const [data, setData] = useState(initialData);
   const [companyId, setCompanyId] = useState(initialCompanyId);
   const [view, setView] = useState<View>('dashboard');
-  const [year, setYear] = useState(2026);
+  const [year, setYear] = useState(CURRENT_YEAR);
   const [query, setQuery] = useState('');
   const [monthFilter, setMonthFilter] = useState(0);
+  const [entriesPage, setEntriesPage] = useState(1);
   const [isPending, startTransition] = useTransition();
-  const [importState, setImportState] = useState<{ file?: File; rows: any[]; format?: ImportFormat; error?: string; success?: string }>({ rows: [] });
+  const [importState, setImportState] = useState<{ file?: File; rows: any[]; format?: ImportFormat; warnings?: string[]; error?: string; success?: string }>({ rows: [] });
 
   const reload = (nextCompanyId = companyId, nextYear = year) => startTransition(async () => {
     setData(await getFinanceDashboard(nextCompanyId, nextYear));
   });
   const chooseCompany = (value: string) => {
     setCompanyId(value);
+    setEntriesPage(1);
     reload(value, year);
   };
   const chooseYear = (value: number) => {
     setYear(value);
+    setEntriesPage(1);
     reload(companyId, value);
   };
 
@@ -67,6 +75,11 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
     const matchesQuery = !term || `${entry.company} ${entry.category} ${entry.account}`.toLocaleLowerCase('pt-BR').includes(term);
     return matchesMonth && matchesQuery;
   }), [data.entries, monthFilter, query]);
+
+  const pagedEntries = useMemo(() => {
+    const start = (entriesPage - 1) * ENTRIES_PAGE_SIZE;
+    return filteredEntries.slice(start, start + ENTRIES_PAGE_SIZE);
+  }, [filteredEntries, entriesPage]);
 
   const maxMonth = Math.max(1, ...data.monthly.flatMap((month) => [month.plannedRevenue, month.actualRevenue, month.plannedExpense, month.actualExpense]));
   const nav: { id: View; label: string }[] = [
@@ -96,7 +109,9 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
     if (!importState.file || !importState.rows.length || companyId === 'ALL') return;
     startTransition(async () => {
       try {
-        const sourceKey = `${companyId}:2026:${importState.file.name}:${importState.file.lastModified}`;
+        // Baseado no conteúdo das linhas (não no nome/data do arquivo), para que
+        // reabrir e salvar a mesma planilha não seja tratado como versão nova.
+        const sourceKey = `${companyId}:${year}:${hashImportRows(importState.rows)}`;
         const result = await importFinancialPlan({
           company_id: companyId,
           file_name: importState.file!.name,
@@ -128,7 +143,7 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
               {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
             </select>
             <select value={year} onChange={(event) => chooseYear(Number(event.target.value))} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white">
-              {[2025, 2026, 2027].map((item) => <option key={item}>{item}</option>)}
+              {SELECTABLE_YEARS.map((item) => <option key={item}>{item}</option>)}
             </select>
             <button onClick={() => reload()} className="rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-blue-300 hover:bg-slate-800" title="Atualizar"><RefreshCw className={`h-4 w-4 ${isPending ? 'animate-spin' : ''}`} /></button>
           </div>
@@ -177,8 +192,9 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
       {view === 'categories' && <section className="grid gap-5 lg:grid-cols-2">{(['REVENUE','EXPENSE'] as const).map((nature) => <div key={nature} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h2 className={`font-bold ${nature === 'REVENUE' ? 'text-emerald-400' : 'text-rose-400'}`}>{nature === 'REVENUE' ? 'Receitas por categoria' : 'Despesas por categoria'}</h2><div className="mt-4 divide-y divide-slate-800">{data.categories.filter((item) => item.nature === nature).map((item) => <div key={item.name} className="grid grid-cols-[1fr_auto_auto] gap-4 py-3 text-xs"><span className="font-semibold text-white">{item.name}</span><span className="text-slate-400">Prev. {money.format(item.planned)}</span><span className="font-bold">Real {money.format(item.actual)}</span></div>)}</div></div>)}</section>}
 
       {view === 'entries' && <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-        <div className="flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar parceiro, categoria ou empresa" className="w-full rounded-xl border border-slate-700 bg-slate-950 py-2 pl-9 pr-3 text-xs outline-none focus:border-blue-500" /></div><select value={monthFilter} onChange={(event) => setMonthFilter(Number(event.target.value))} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs"><option value={0}>Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></div>
-        <div className="max-h-[620px] overflow-auto"><table className="w-full min-w-[950px] text-[11px]"><thead className="sticky top-0 bg-slate-950 text-slate-400"><tr>{['Período','Empresa','Categoria','Parceiro / Conta','Cenário','Natureza','Valor','Conciliação'].map((title) => <th key={title} className="px-3 py-3 text-left last:text-center">{title}</th>)}</tr></thead><tbody>{filteredEntries.slice(0, 1000).map((entry) => <tr key={entry.id} className="border-t border-slate-800/70"><td className="whitespace-nowrap px-3 py-2">{new Date(entry.period_start).toLocaleDateString('pt-BR')}–{new Date(entry.period_end).toLocaleDateString('pt-BR')}</td><td className="px-3 py-2">{entry.company}</td><td className="px-3 py-2">{entry.category}</td><td className="px-3 py-2 font-semibold text-white">{entry.account}</td><td className="px-3 py-2">{entry.scenario === 'ACTUAL' ? 'Real' : 'Previsto'}</td><td className={entry.nature === 'REVENUE' ? 'px-3 py-2 text-emerald-400' : 'px-3 py-2 text-rose-400'}>{entry.nature === 'REVENUE' ? 'Receita' : 'Despesa'}</td><td className="px-3 py-2 text-right font-bold">{money.format(entry.amount)}</td><td className="px-3 py-2 text-center">{entry.is_reconciled ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-400" /> : '—'}</td></tr>)}</tbody></table></div>
+        <div className="flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" /><input value={query} onChange={(event) => { setQuery(event.target.value); setEntriesPage(1); }} placeholder="Buscar parceiro, categoria ou empresa" className="w-full rounded-xl border border-slate-700 bg-slate-950 py-2 pl-9 pr-3 text-xs outline-none focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" /></div><select value={monthFilter} onChange={(event) => { setMonthFilter(Number(event.target.value)); setEntriesPage(1); }} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"><option value={0}>Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></div>
+        <div className="max-h-[620px] overflow-auto"><table className="w-full min-w-[950px] text-xs"><thead className="sticky top-0 bg-slate-950 text-slate-400"><tr>{['Período','Empresa','Categoria','Parceiro / Conta','Cenário','Natureza','Valor','Conciliação'].map((title) => <th key={title} className="px-3 py-3 text-left last:text-center">{title}</th>)}</tr></thead><tbody>{pagedEntries.map((entry) => <tr key={entry.id} className="border-t border-slate-800/70"><td className="whitespace-nowrap px-3 py-2">{new Date(entry.period_start).toLocaleDateString('pt-BR')}–{new Date(entry.period_end).toLocaleDateString('pt-BR')}</td><td className="px-3 py-2">{entry.company}</td><td className="px-3 py-2">{entry.category}</td><td className="px-3 py-2 font-semibold text-white">{entry.account}</td><td className="px-3 py-2">{entry.scenario === 'ACTUAL' ? 'Real' : 'Previsto'}</td><td className={entry.nature === 'REVENUE' ? 'px-3 py-2 text-emerald-400' : 'px-3 py-2 text-rose-400'}>{entry.nature === 'REVENUE' ? 'Receita' : 'Despesa'}</td><td className="px-3 py-2 text-right font-bold">{money.format(entry.amount)}</td><td className="px-3 py-2 text-center">{entry.is_reconciled ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-400" /> : '—'}</td></tr>)}</tbody></table></div>
+        <Pagination page={entriesPage} pageSize={ENTRIES_PAGE_SIZE} totalItems={filteredEntries.length} onPageChange={setEntriesPage} />
       </section>}
 
       {view === 'import' && <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
@@ -186,6 +202,14 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
         {companyId === 'ALL' && <div className="mt-5 flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200"><AlertTriangle className="h-4 w-4 shrink-0" />Selecione uma empresa específica antes de importar.</div>}
         <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-10 text-center hover:border-blue-500"><Upload className="h-8 w-8 text-blue-400" /><span className="mt-3 text-sm font-bold">Escolher arquivo Excel</span><span className="mt-1 text-xs text-slate-500">.xlsx ou .xls</span><input type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => event.target.files?.[0] && inspectFile(event.target.files[0])} /></label>
         {importState.file && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4 text-xs"><b>{importState.file.name}</b><p className="mt-1 text-slate-400">{importState.rows.length ? `${importState.rows.length} registros reconhecidos • ${importState.format === 'SANKHYA' ? 'Movimentação Financeira Sankhya' : 'Plano Financeiro mensal'}. Confirme a empresa selecionada antes de importar.` : 'Analisando ou aguardando correção...'}</p></div>}
+        {!!importState.warnings?.length && (
+          <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <p className="font-bold">Atenção antes de confirmar:</p>
+            <ul className="mt-1.5 list-disc space-y-1 pl-4">
+              {importState.warnings!.map((warning, index) => <li key={index}>{warning}</li>)}
+            </ul>
+          </div>
+        )}
         {importState.error && <p className="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs text-rose-300">{importState.error}</p>}
         {importState.success && <p className="mt-3 rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-300">{importState.success}</p>}
         <button disabled={!importState.rows.length || companyId === 'ALL' || isPending} onClick={confirmImport} className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{isPending ? 'Importando...' : 'Confirmar importação'}</button>

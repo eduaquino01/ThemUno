@@ -12,10 +12,13 @@ import {
   updateContract,
   deleteContract,
   createContractCredential,
-  deleteContractCredential
+  deleteContractCredential,
+  getCredentialSecret
 } from '@/app/actions';
 import { formatCurrency, parseNumber, formatDate } from '@/lib/formatters';
 import PasswordInputWithGenerator from '@/components/PasswordInputWithGenerator';
+import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 export type ContractType = 'MSA' | 'SOW' | 'SLA' | 'NDA' | 'SAAS' | 'HARDWARE' | 'PARTNERSHIP' | 'AMENDMENT';
 export type ContractStatus = 'DRAFT' | 'IN_REVIEW' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
 export type AcceptanceStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';
@@ -73,6 +76,8 @@ interface ContractDetailsClientProps {
 
 export default function ContractDetailsClient({ contract }: ContractDetailsClientProps) {
   const router = useRouter();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [isPending, startTransition] = useTransition();
   const [activeTab, setActiveTab] = useState<'overview' | 'milestones' | 'changes' | 'risks' | 'invoices' | 'credentials'>('overview');
 
@@ -83,11 +88,15 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showEditContractModal, setShowEditContractModal] = useState(false);
   const [showDeleteContractModal, setShowDeleteContractModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showCredentialModal, setShowCredentialModal] = useState(false);
 
   // Credential state & visibility
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Segredos revelados sob demanda (nunca chegam do carregamento inicial da página)
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
+  const [revealingId, setRevealingId] = useState<string | null>(null);
 
   const [credentialForm, setCredentialForm] = useState({
     type: 'PORTAL_LOGIN' as 'PORTAL_LOGIN' | 'API_KEY' | 'SOFTWARE_LICENSE' | 'SERVICE_ACCOUNT' | 'OTHER',
@@ -177,7 +186,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
         await updateMilestoneAcceptance(milestoneId, status);
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao alterar aceite.');
+        toast.error(err.message || 'Erro ao alterar aceite.');
       }
     });
   };
@@ -266,8 +275,39 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const toggleSecretVisibility = (id: string) => {
-    setVisibleSecrets((prev) => ({ ...prev, [id]: !prev[id] }));
+  // Busca o segredo no servidor na primeira vez que é revelado/copiado e
+  // mantém em cache local só para esta sessão da página.
+  const revealCredential = async (id: string): Promise<string | null> => {
+    if (revealedSecrets[id]) return revealedSecrets[id];
+    setRevealingId(id);
+    try {
+      const secret = await getCredentialSecret(id);
+      setRevealedSecrets((prev) => ({ ...prev, [id]: secret }));
+      return secret;
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao revelar credencial.');
+      return null;
+    } finally {
+      setRevealingId(null);
+    }
+  };
+
+  const toggleSecretVisibility = async (id: string) => {
+    if (visibleSecrets[id]) {
+      setVisibleSecrets((prev) => ({ ...prev, [id]: false }));
+      return;
+    }
+    const secret = await revealCredential(id);
+    if (secret !== null) {
+      setVisibleSecrets((prev) => ({ ...prev, [id]: true }));
+    }
+  };
+
+  const handleCopyCredentialSecret = async (id: string) => {
+    const secret = await revealCredential(id);
+    if (secret !== null) {
+      handleCopySecret(id, secret);
+    }
   };
 
   const handleAddCredential = async (e: React.FormEvent) => {
@@ -276,7 +316,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
 
     startTransition(async () => {
       try {
-        await createContractCredential({
+        const created = await createContractCredential({
           contract_id: contract.id,
           type: credentialForm.type,
           title: credentialForm.title,
@@ -285,6 +325,12 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
           login_url: credentialForm.login_url || null,
           notes: credentialForm.notes || null,
         });
+        // O usuário acabou de digitar esse segredo neste formulário — não há
+        // problema em já deixá-lo disponível localmente para "revelar" sem
+        // precisar buscar de novo no servidor.
+        if (created) {
+          setRevealedSecrets(prev => ({ ...prev, [created.id]: credentialForm.secret_value }));
+        }
         setShowCredentialModal(false);
         setCredentialForm({
           type: 'PORTAL_LOGIN',
@@ -352,7 +398,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   <Pencil className="w-3.5 h-3.5" /> Editar Contrato
                 </button>
                 <button
-                  onClick={() => setShowDeleteContractModal(true)}
+                  onClick={() => { setDeleteConfirmText(''); setShowDeleteContractModal(true); }}
                   className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl transition-all shadow-sm"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Excluir
@@ -516,7 +562,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-3">
                         <h4 className="font-bold text-base text-white">{m.title}</h4>
-                        <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold border ${
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold border ${
                           m.acceptance_status === 'ACCEPTED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                           m.acceptance_status === 'REJECTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                           'bg-amber-500/10 text-amber-400 border-amber-500/20'
@@ -605,7 +651,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     <div className="space-y-1">
                       <div className="flex items-center gap-3">
                         <h4 className="font-bold text-sm text-white">{cr.title}</h4>
-                        <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold uppercase border ${
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold uppercase border ${
                           cr.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                           cr.status === 'REJECTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                           'bg-amber-500/10 text-amber-400 border-amber-500/20'
@@ -658,7 +704,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     <div key={r.id} className="glass-panel p-5 rounded-xl border-l-4 border-l-red-500 space-y-2">
                       <div className="flex justify-between items-start">
                         <span className="font-bold text-xs text-red-400 uppercase tracking-wider">{r.category}</span>
-                        <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold border ${
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold border ${
                           r.risk_level === 'CRITICAL' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                           r.risk_level === 'HIGH' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                           'bg-blue-500/10 text-blue-400 border-blue-500/20'
@@ -685,23 +731,23 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                 <h4 className="font-bold text-sm text-white mb-4 text-center">Matriz de Severidade Operacional</h4>
                 <div className="grid grid-cols-3 gap-2 w-full max-w-[280px]">
                   {/* Row Critical */}
-                  <div className="bg-red-950/30 border border-red-500/30 text-red-400 h-16 rounded flex items-center justify-center text-[10px] font-bold">
+                  <div className="bg-red-950/30 border border-red-500/30 text-red-400 h-16 rounded flex items-center justify-center text-xs font-bold">
                     CRÍTICO
                   </div>
-                  <div className="bg-amber-950/20 border border-amber-500/20 text-amber-400 h-16 rounded flex items-center justify-center text-[10px] font-bold">
+                  <div className="bg-amber-950/20 border border-amber-500/20 text-amber-400 h-16 rounded flex items-center justify-center text-xs font-bold">
                     ALTO
                   </div>
-                  <div className="bg-blue-950/20 border border-blue-500/20 text-blue-400 h-16 rounded flex items-center justify-center text-[10px] font-bold">
+                  <div className="bg-blue-950/20 border border-blue-500/20 text-blue-400 h-16 rounded flex items-center justify-center text-xs font-bold">
                     MÉDIO
                   </div>
                   {/* Row High */}
-                  <div className="bg-amber-950/20 border border-amber-500/20 text-amber-400 h-16 rounded flex items-center justify-center text-[10px] font-bold">
+                  <div className="bg-amber-950/20 border border-amber-500/20 text-amber-400 h-16 rounded flex items-center justify-center text-xs font-bold">
                     ALTO
                   </div>
-                  <div className="bg-blue-950/20 border border-blue-500/20 text-blue-400 h-16 rounded flex items-center justify-center text-[10px] font-bold">
+                  <div className="bg-blue-950/20 border border-blue-500/20 text-blue-400 h-16 rounded flex items-center justify-center text-xs font-bold">
                     MÉDIO
                   </div>
-                  <div className="bg-slate-900 border border-[#1e293b] text-gray-400 h-16 rounded flex items-center justify-center text-[10px] font-bold">
+                  <div className="bg-slate-900 border border-[#1e293b] text-gray-400 h-16 rounded flex items-center justify-center text-xs font-bold">
                     BAIXO
                   </div>
                 </div>
@@ -750,7 +796,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                         <td className="px-6 py-4 text-gray-300">{formatDate(inv.due_date)}</td>
                         <td className="px-6 py-4 font-bold text-white">{formatCurrency(inv.amount)}</td>
                         <td className="px-6 py-4">
-                          <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold uppercase border ${
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold uppercase border ${
                             inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                             inv.status === 'ISSUED' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
                             inv.status === 'DISPUTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
@@ -847,7 +893,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                         </div>
                         <button
                           onClick={async () => {
-                            if (confirm('Tem certeza que deseja excluir esta credencial do cofre?')) {
+                            if (await confirmDialog('Tem certeza que deseja excluir esta credencial do cofre?', { tone: 'danger', confirmLabel: 'Excluir' })) {
                               startTransition(async () => {
                                 await deleteContractCredential(cred.id);
                                 router.refresh();
@@ -886,18 +932,26 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                           </span>
                           <div className="flex items-center gap-2 font-mono font-bold text-white">
                             <span className="tracking-widest">
-                              {isSecretVisible ? cred.secret_value : '••••••••••••'}
+                              {isSecretVisible ? revealedSecrets[cred.id] : '••••••••••••'}
                             </span>
                             <button
                               onClick={() => toggleSecretVisibility(cred.id)}
-                              className="p-1 text-gray-400 hover:text-white transition-colors ml-1"
+                              disabled={revealingId === cred.id}
+                              className="p-1 text-gray-400 hover:text-white transition-colors ml-1 disabled:opacity-50"
                               title={isSecretVisible ? 'Ocultar' : 'Revelar'}
                             >
-                              {isSecretVisible ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5 text-blue-400" />}
+                              {revealingId === cred.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                              ) : isSecretVisible ? (
+                                <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5 text-blue-400" />
+                              )}
                             </button>
                             <button
-                              onClick={() => handleCopySecret(cred.id, cred.secret_value)}
-                              className="p-1 text-gray-400 hover:text-white transition-colors"
+                              onClick={() => handleCopyCredentialSecret(cred.id)}
+                              disabled={revealingId === cred.id}
+                              className="p-1 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
                               title="Copiar Segredo"
                             >
                               {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -958,7 +1012,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required placeholder="Ex: Blueprint Aprovado"
                   value={milestoneForm.title}
                   onChange={(e) => setMilestoneForm({ ...milestoneForm, title: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -967,7 +1021,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   required placeholder="Ex: Detalhamento dos entregáveis..."
                   value={milestoneForm.scope_description}
                   onChange={(e) => setMilestoneForm({ ...milestoneForm, scope_description: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-20"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-20"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -977,7 +1031,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="date" required
                     value={milestoneForm.due_date}
                     onChange={(e) => setMilestoneForm({ ...milestoneForm, due_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -986,7 +1040,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="text" required inputMode="decimal" placeholder="Ex: 4.087,69 ou 4087.69"
                     value={milestoneForm.billing_value}
                     onChange={(e) => setMilestoneForm({ ...milestoneForm, billing_value: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -996,7 +1050,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required placeholder="Ex: Assinatura do termo de aceite pelo Diretor de TI"
                   value={milestoneForm.acceptance_criteria}
                   onChange={(e) => setMilestoneForm({ ...milestoneForm, acceptance_criteria: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
               <div className="flex gap-3 justify-end pt-4 border-t border-[#1e293b]">
@@ -1023,7 +1077,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required placeholder="Ex: Criação de conector legando adicional"
                   value={changeForm.title}
                   onChange={(e) => setChangeForm({ ...changeForm, title: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -1032,7 +1086,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required placeholder="Ex: PM Carlos Barbosa"
                   value={changeForm.requested_by}
                   onChange={(e) => setChangeForm({ ...changeForm, requested_by: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -1041,7 +1095,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   required placeholder="Ex: Descrição técnica do que muda..."
                   value={changeForm.scope_impact}
                   onChange={(e) => setChangeForm({ ...changeForm, scope_impact: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-20"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-20"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1051,7 +1105,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="text" required inputMode="decimal" placeholder="Ex: 4.087,69 ou 4087.69"
                     value={changeForm.financial_impact}
                     onChange={(e) => setChangeForm({ ...changeForm, financial_impact: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1060,7 +1114,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="number" required
                     value={changeForm.time_impact_days}
                     onChange={(e) => setChangeForm({ ...changeForm, time_impact_days: Number(e.target.value) })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1088,7 +1142,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   <select 
                     value={riskForm.category}
                     onChange={(e) => setRiskForm({ ...riskForm, category: e.target.value as RiskCategory })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   >
                     {Object.keys(RiskCategory).map(c => (
                       <option key={c} value={c}>{c}</option>
@@ -1100,7 +1154,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   <select 
                     value={riskForm.risk_level}
                     onChange={(e) => setRiskForm({ ...riskForm, risk_level: e.target.value as RiskLevel })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   >
                     {Object.keys(RiskLevel).map(l => (
                       <option key={l} value={l}>{l}</option>
@@ -1114,7 +1168,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   required placeholder="Ex: Identificação de vazamento potencial de log..."
                   value={riskForm.description}
                   onChange={(e) => setRiskForm({ ...riskForm, description: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-20"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-20"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -1123,7 +1177,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   required placeholder="Ex: Criação de rotinas adicionais de mascaramento..."
                   value={riskForm.mitigation_plan}
                   onChange={(e) => setRiskForm({ ...riskForm, mitigation_plan: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-20"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-20"
                 />
               </div>
               <div className="flex gap-3 justify-end pt-4 border-t border-[#1e293b]">
@@ -1166,7 +1220,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     });
                     setErrorMsg('');
                   }}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 >
                   <option value="">Faturamento Direto (Sem Marco Vinculado)</option>
                   {contract.milestones && contract.milestones.map((m: any) => (
@@ -1194,7 +1248,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required placeholder="Ex: NF-2026-9024"
                   value={invoiceForm.invoice_number}
                   onChange={(e) => setInvoiceForm({ ...invoiceForm, invoice_number: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -1206,7 +1260,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="date" required
                     value={invoiceForm.issue_date}
                     onChange={(e) => setInvoiceForm({ ...invoiceForm, issue_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1215,7 +1269,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="date" required
                     value={invoiceForm.due_date}
                     onChange={(e) => setInvoiceForm({ ...invoiceForm, due_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1227,7 +1281,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required inputMode="decimal" placeholder="Ex: 4.087,69 ou 4087.69"
                   value={invoiceForm.amount}
                   onChange={(e) => setInvoiceForm({ ...invoiceForm, amount: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -1276,7 +1330,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   setShowEditContractModal(false);
                   router.refresh();
                 } catch (err: any) {
-                  alert(err.message || 'Erro ao atualizar contrato.');
+                  toast.error(err.message || 'Erro ao atualizar contrato.');
                 }
               });
             }} className="p-6 space-y-4">
@@ -1286,7 +1340,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" required
                   value={editContractForm.title}
                   onChange={(e) => setEditContractForm({ ...editContractForm, title: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1296,7 +1350,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="text" required
                     value={editContractForm.counterpart}
                     onChange={(e) => setEditContractForm({ ...editContractForm, counterpart: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1304,7 +1358,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   <select 
                     value={editContractForm.type}
                     onChange={(e) => setEditContractForm({ ...editContractForm, type: e.target.value as any })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   >
                     <option value="SOW">SOW</option>
                     <option value="MSA">MSA</option>
@@ -1321,7 +1375,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="date" required
                     value={editContractForm.start_date}
                     onChange={(e) => setEditContractForm({ ...editContractForm, start_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1330,7 +1384,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="date" required
                     value={editContractForm.end_date}
                     onChange={(e) => setEditContractForm({ ...editContractForm, end_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1341,7 +1395,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="number" min={0}
                     value={editContractForm.notice_period_days}
                     onChange={(e) => setEditContractForm({ ...editContractForm, notice_period_days: Number(e.target.value) })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1350,7 +1404,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="text" inputMode="decimal" required
                     value={editContractForm.total_value}
                     onChange={(e) => setEditContractForm({ ...editContractForm, total_value: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1366,39 +1420,75 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
       )}
 
       {/* DELETE CONTRACT CONFIRMATION MODAL */}
-      {showDeleteContractModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-[#0d1527] border border-rose-500/30 rounded-xl shadow-2xl p-6 space-y-4 animate-fade-in">
-            <div className="flex items-center gap-3 text-rose-400">
-              <AlertTriangle className="w-6 h-6 shrink-0" />
-              <h3 className="font-bold text-lg text-white">Excluir Contrato?</h3>
-            </div>
-            <p className="text-xs text-gray-300">
-              Tem certeza que deseja excluir o contrato <strong className="text-white">{contract.title}</strong>? Esta ação não pode ser desfeita.
-            </p>
-            <div className="flex justify-end gap-3 pt-3 border-t border-[#1e293b]">
-              <button type="button" onClick={() => setShowDeleteContractModal(false)} className="px-4 py-2 text-xs text-gray-400 hover:text-white">Cancelar</button>
-              <button 
-                type="button" 
-                onClick={() => {
-                  startTransition(async () => {
-                    try {
-                      await deleteContract(contract.id);
-                      router.push('/contracts');
-                    } catch (err: any) {
-                      alert(err.message || 'Erro ao excluir contrato.');
-                    }
-                  });
-                }}
-                disabled={isPending}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-lg"
-              >
-                {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Excluir Definitivamente'}
-              </button>
+      {showDeleteContractModal && (() => {
+        const relatedCounts = [
+          { label: 'marco(s)', count: contract.milestones?.length || 0 },
+          { label: 'aditivo(s) / mudança(s) de escopo', count: contract.change_requests?.length || 0 },
+          { label: 'risco(s) registrado(s)', count: contract.risks?.length || 0 },
+          { label: 'fatura(s)', count: contract.invoices?.length || 0 },
+          { label: 'credencial(is) no cofre', count: contract.credentials?.length || 0 },
+        ].filter((item) => item.count > 0);
+        const isConfirmed = deleteConfirmText.trim() === contract.title;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md bg-[#0d1527] border border-rose-500/30 rounded-xl shadow-2xl p-6 space-y-4 animate-fade-in">
+              <div className="flex items-center gap-3 text-rose-400">
+                <AlertTriangle className="w-6 h-6 shrink-0" />
+                <h3 className="font-bold text-lg text-white">Excluir Contrato?</h3>
+              </div>
+              <p className="text-xs text-gray-300">
+                Tem certeza que deseja excluir o contrato <strong className="text-white">{contract.title}</strong>? Esta ação não pode ser desfeita.
+              </p>
+              {relatedCounts.length > 0 && (
+                <div className="bg-rose-950/30 border border-rose-500/20 rounded-lg p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-rose-300 uppercase tracking-wider">
+                    Isto também vai apagar permanentemente:
+                  </p>
+                  <ul className="text-xs text-gray-300 space-y-0.5 list-disc list-inside">
+                    {relatedCounts.map((item) => (
+                      <li key={item.label}>{item.count} {item.label}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs text-gray-400">
+                  Para confirmar, digite o nome do contrato: <strong className="text-white">{contract.title}</strong>
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  autoFocus
+                  className="w-full px-3 py-2 text-sm bg-slate-950 border border-rose-500/30 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:border-rose-500"
+                  placeholder={contract.title}
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-3 border-t border-[#1e293b]">
+                <button type="button" onClick={() => setShowDeleteContractModal(false)} className="px-4 py-2 text-xs text-gray-400 hover:text-white">Cancelar</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isConfirmed) return;
+                    startTransition(async () => {
+                      try {
+                        await deleteContract(contract.id);
+                        router.push('/contracts');
+                      } catch (err: any) {
+                        toast.error(err.message || 'Erro ao excluir contrato.');
+                      }
+                    });
+                  }}
+                  disabled={isPending || !isConfirmed}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-600 rounded-lg"
+                >
+                  {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Excluir Definitivamente'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* CREDENTIAL CREATION MODAL */}
       {showCredentialModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -1418,7 +1508,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   <select 
                     value={credentialForm.type}
                     onChange={(e) => setCredentialForm({ ...credentialForm, type: e.target.value as any })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 font-semibold"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 font-semibold"
                   >
                     <option value="PORTAL_LOGIN">Portal Web / Painel</option>
                     <option value="API_KEY">Chave de API / Token</option>
@@ -1433,7 +1523,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="text" required placeholder="Ex: Login Admin Portal AWS"
                     value={credentialForm.title}
                     onChange={(e) => setCredentialForm({ ...credentialForm, title: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1445,7 +1535,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                     type="text" placeholder="Ex: admin@empresa.com"
                     value={credentialForm.username}
                     onChange={(e) => setCredentialForm({ ...credentialForm, username: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1463,7 +1553,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   type="text" placeholder="Ex: https://console.aws.amazon.com"
                   value={credentialForm.login_url}
                   onChange={(e) => setCredentialForm({ ...credentialForm, login_url: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -1473,7 +1563,7 @@ export default function ContractDetailsClient({ contract }: ContractDetailsClien
                   placeholder="Ex: Renovação anual exigida, MFA ativo no telefone do gestor."
                   value={credentialForm.notes}
                   onChange={(e) => setCredentialForm({ ...credentialForm, notes: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-20"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-20"
                 />
               </div>
 

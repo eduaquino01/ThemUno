@@ -1,18 +1,21 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --card: #ffffff;
-  --card-border: #e2e8f0;
-  --accent-blue: #2563eb;
-  --accent-purple: #7c3aed;
-  --accent-emerald: #059669;
-  --accent-amber: #d97706;
-  --accent-rose: #e11d48;
-}
+/* O app roda sempre no tema escuro (a classe "dark" é fixa em <html>, sem
+   nenhum alternador de tema) — por isso o utilitário dark: do Tailwind é
+   redefinido aqui para casar com essa classe (&:where(.dark, .dark *)) em
+   vez do padrão do Tailwind v4, que segue a preferência de cor do
+   sistema operacional (@media prefers-color-scheme). Sem isso, os cerca
+   de 150 usos de dark: espalhados pelo Dashboard ficavam sujeitos ao tema
+   do SO do usuário, podendo renderizar em modo claro por baixo de um
+   fundo que os tokens abaixo sempre pintam de escuro — uma mistura
+   inconsistente de paleta. */
+@custom-variant dark (&:where(.dark, .dark *));
 
-.dark {
+/* Como o tema escuro é o único usado, os tokens abaixo já refletem
+   diretamente os valores antes definidos em ".dark" — o bloco de valores
+   claros (usado apenas se a classe "dark" fosse removida, o que nunca
+   acontece) foi removido para não manter paleta morta no CSS. */
+:root {
   --background: #090d16;
   --foreground: #f1f5f9;
   --card: #111827;
@@ -90,4 +93,16 @@ body {
   background: rgba(17, 24, 39, 0.85);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(30, 41, 59, 0.8);
+}
+
+/* Foco visível padronizado: garante um indicador de foco perceptível em
+   QUALQUER elemento focável por teclado — inputs, botões e links que ainda
+   não têm seu próprio anel de foco declarado —, sem aparecer em cliques de
+   mouse (:focus-visible). Componentes que já definem seu próprio anel
+   (ex.: Button.tsx) desligam este outline explicitamente com
+   focus-visible:outline-none, então não há conflito visual entre os dois. */
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

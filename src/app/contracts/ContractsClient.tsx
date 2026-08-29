@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect, useTransition, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createContract, updateContract, deleteContract, getCompanies } from '@/app/actions';
 import { formatCurrency, parseNumber, formatDate } from '@/lib/formatters';
+import { useToast } from '@/components/ui/ToastProvider';
+import EmptyState from '@/components/ui/EmptyState';
+import Pagination from '@/components/ui/Pagination';
 export type ContractType = 'MSA' | 'SOW' | 'SLA' | 'NDA' | 'SAAS' | 'HARDWARE' | 'PARTNERSHIP' | 'AMENDMENT';
 export type ContractStatus = 'DRAFT' | 'IN_REVIEW' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
 export type ContractNature = 'REVENUE' | 'EXPENSE';
@@ -52,6 +55,7 @@ interface ContractsClientProps {
 
 export default function ContractsClient({ initialContracts }: ContractsClientProps) {
   const router = useRouter();
+  const toast = useToast();
   const [contracts, setContracts] = useState(initialContracts);
   const [isPending, startTransition] = useTransition();
 
@@ -62,6 +66,8 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
   const [selectedNature, setSelectedNature] = useState<string>('ALL');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
+  const CONTRACTS_PAGE_SIZE = 50;
+  const [contractsPage, setContractsPage] = useState(1);
 
   useEffect(() => {
     async function loadCompanies() {
@@ -84,6 +90,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
 
     const handleCompanyChange = (e: any) => {
       setSelectedCompanyId(e.detail || 'ALL');
+      setContractsPage(1);
     };
     window.addEventListener('themuno_company_changed', handleCompanyChange);
     return () => window.removeEventListener('themuno_company_changed', handleCompanyChange);
@@ -95,7 +102,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
       await updateContract(id, { status });
       router.refresh();
     } catch (err: any) {
-      alert(err.message || 'Erro ao atualizar status do contrato.');
+      toast.error(err.message || 'Erro ao atualizar status do contrato.');
     }
   };
 
@@ -136,13 +143,14 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
 
   // DELETE state
   const [deletingContract, setDeletingContract] = useState<any | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   useEffect(() => {
     setContracts(initialContracts);
   }, [initialContracts]);
 
   // Filter logic
-  const filteredContracts = contracts.filter((c) => {
+  const filteredContracts = useMemo(() => contracts.filter((c) => {
     const matchesCompany = selectedCompanyId === 'ALL' || c.company_id === selectedCompanyId;
     const matchesSearch =
       c.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -152,7 +160,23 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
     const matchesNature = selectedNature === 'ALL' || c.nature === selectedNature;
 
     return matchesCompany && matchesSearch && matchesType && matchesStatus && matchesNature;
-  });
+  }), [contracts, selectedCompanyId, search, selectedType, selectedStatus, selectedNature]);
+
+  // Sempre que os filtros mudarem, volta para a primeira página — evita ficar
+  // "preso" numa página que deixou de existir depois de filtrar a lista.
+  useEffect(() => {
+    setContractsPage(1);
+  }, [selectedCompanyId, search, selectedType, selectedStatus, selectedNature]);
+
+  // Fatia da lista filtrada exibida na página atual da tabela (a visão em
+  // Kanban continua mostrando todos os cartões de cada coluna, já que ali a
+  // organização por status já limita naturalmente o tamanho de cada lista).
+  const pagedContracts = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredContracts.length / CONTRACTS_PAGE_SIZE));
+    const safePage = Math.min(contractsPage, totalPages);
+    const start = (safePage - 1) * CONTRACTS_PAGE_SIZE;
+    return filteredContracts.slice(start, start + CONTRACTS_PAGE_SIZE);
+  }, [filteredContracts, contractsPage]);
 
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,13 +275,14 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
         setEditingContract(null);
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao atualizar contrato.');
+        toast.error(err.message || 'Erro ao atualizar contrato.');
       }
     });
   };
 
   const handleDelete = async () => {
     if (!deletingContract) return;
+    if (deleteConfirmText.trim() !== deletingContract.title) return;
 
     startTransition(async () => {
       try {
@@ -266,7 +291,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
         setDeletingContract(null);
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao excluir contrato.');
+        toast.error(err.message || 'Erro ao excluir contrato.');
       }
     });
   };
@@ -284,7 +309,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
             placeholder="Buscar por título ou contraparte..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+            className="w-full pl-9 pr-4 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
           />
         </div>
 
@@ -299,7 +324,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
           <select 
             value={selectedType}
             onChange={(e) => setSelectedType(e.target.value)}
-            className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:border-blue-500"
+            className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
           >
             <option value="ALL">Todos os Tipos</option>
             {Object.keys(ContractType).map(t => (
@@ -311,7 +336,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
           <select 
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:border-blue-500"
+            className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
           >
             <option value="ALL">Todos os Status</option>
             {Object.keys(ContractStatus).map(s => (
@@ -370,8 +395,8 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e293b]/50 text-sm">
-                {filteredContracts.length > 0 ? (
-                  filteredContracts.map((c) => (
+                {pagedContracts.length > 0 ? (
+                  pagedContracts.map((c) => (
                     <tr key={c.id} className="hover:bg-white/5 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -456,7 +481,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => setDeletingContract(c)}
+                            onClick={() => { setDeleteConfirmText(''); setDeletingContract(c); }}
                             className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-colors"
                             title="Excluir Contrato"
                           >
@@ -468,14 +493,24 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
-                      Nenhum contrato cadastrado ou correspondente aos filtros.
+                    <td colSpan={9} className="px-6 py-8">
+                      <EmptyState
+                        icon={FileText}
+                        title="Nenhum contrato encontrado"
+                        description="Nenhum contrato cadastrado corresponde aos filtros selecionados."
+                      />
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={contractsPage}
+            pageSize={CONTRACTS_PAGE_SIZE}
+            totalItems={filteredContracts.length}
+            onPageChange={setContractsPage}
+          />
         </div>
       ) : (
         /* KANBAN BOARD VIEW */
@@ -514,7 +549,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                           className="p-4 rounded-xl bg-slate-900 border border-slate-800 hover:border-blue-500/40 shadow-md space-y-3 transition-all group"
                         >
                           <div className="flex items-center justify-between">
-                            <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold uppercase border ${
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold uppercase border ${
                               c.nature === 'REVENUE'
                                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                                 : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
@@ -559,7 +594,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                             <select
                               value={c.status}
                               onChange={(e) => handleStatusChange(c.id, e.target.value as ContractStatus)}
-                              className="text-[11px] bg-slate-950 border border-slate-800 rounded-lg text-gray-300 font-semibold px-2 py-1 focus:outline-none focus:border-blue-500"
+                              className="text-[11px] bg-slate-950 border border-slate-800 rounded-lg text-gray-300 font-semibold px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                             >
                               <option value="DRAFT">📝 Rascunho</option>
                               <option value="IN_REVIEW">🔍 Em Revisão</option>
@@ -627,7 +662,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   placeholder="Ex: Contrato de Licenciamento SaaS ERP"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -637,7 +672,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   <select 
                     value={formData.company_id}
                     onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 font-semibold"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 font-semibold"
                   >
                     <option value="">Selecione a empresa...</option>
                     {companiesList.map(c => (
@@ -650,7 +685,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   <select 
                     value={formData.nature}
                     onChange={(e) => setFormData({ ...formData, nature: e.target.value as ContractNature })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 font-semibold"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 font-semibold"
                   >
                     <option value="EXPENSE">Despesa (Fornecedor / Pagamento)</option>
                     <option value="REVENUE">Receita (Cliente / Faturamento)</option>
@@ -666,7 +701,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   placeholder="Ex: Tech Solutions Corp."
                   value={formData.counterpart}
                   onChange={(e) => setFormData({ ...formData, counterpart: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -678,7 +713,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     required
                     value={formData.start_date}
                     onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -688,7 +723,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     required
                     value={formData.end_date}
                     onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -701,7 +736,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     min={0}
                     value={formData.notice_period_days}
                     onChange={(e) => setFormData({ ...formData, notice_period_days: Number(e.target.value) })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -713,7 +748,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     placeholder="Ex: 4.087,69 ou 4087.69"
                     value={formData.total_value}
                     onChange={(e) => setFormData({ ...formData, total_value: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -724,7 +759,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   <select 
                     value={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value as ContractStatus })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   >
                     {Object.keys(ContractStatus).map(s => (
                       <option key={s} value={s}>{s}</option>
@@ -750,7 +785,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   placeholder="Ex: https://storage.googleapis.com/.../minuta.pdf"
                   value={formData.raw_text_or_url}
                   onChange={(e) => setFormData({ ...formData, raw_text_or_url: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -797,7 +832,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   required
                   value={editFormData.title}
                   onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -807,7 +842,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   <select 
                     value={editFormData.nature}
                     onChange={(e) => setEditFormData({ ...editFormData, nature: e.target.value as ContractNature })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 font-semibold"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 font-semibold"
                   >
                     <option value="EXPENSE">Despesa (Fornecedor / Pagamento)</option>
                     <option value="REVENUE">Receita (Cliente / Faturamento)</option>
@@ -820,7 +855,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     required
                     value={editFormData.counterpart}
                     onChange={(e) => setEditFormData({ ...editFormData, counterpart: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -833,7 +868,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     required
                     value={editFormData.start_date}
                     onChange={(e) => setEditFormData({ ...editFormData, start_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -843,7 +878,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     required
                     value={editFormData.end_date}
                     onChange={(e) => setEditFormData({ ...editFormData, end_date: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -856,7 +891,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     min={0}
                     value={editFormData.notice_period_days}
                     onChange={(e) => setEditFormData({ ...editFormData, notice_period_days: Number(e.target.value) })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -867,7 +902,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                     required
                     value={editFormData.total_value}
                     onChange={(e) => setEditFormData({ ...editFormData, total_value: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -878,7 +913,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   <select 
                     value={editFormData.status}
                     onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as ContractStatus })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   >
                     {Object.keys(ContractStatus).map(s => (
                       <option key={s} value={s}>{s}</option>
@@ -903,7 +938,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
                   type="text" 
                   value={editFormData.raw_text_or_url}
                   onChange={(e) => setEditFormData({ ...editFormData, raw_text_or_url: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -929,7 +964,16 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
       )}
 
       {/* DELETE CONTRACT CONFIRMATION MODAL */}
-      {deletingContract && (
+      {deletingContract && (() => {
+        const relatedCounts = [
+          { label: 'marco(s)', count: deletingContract.milestones?.length || 0 },
+          { label: 'aditivo(s) / mudança(s) de escopo', count: deletingContract.change_requests?.length || 0 },
+          { label: 'risco(s) registrado(s)', count: deletingContract.risks?.length || 0 },
+          { label: 'fatura(s)', count: deletingContract.invoices?.length || 0 },
+          { label: 'credencial(is) no cofre', count: deletingContract.credentials?.length || 0 },
+        ].filter((item) => item.count > 0);
+        const isConfirmed = deleteConfirmText.trim() === deletingContract.title;
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="w-full max-w-md bg-[#0d1527] border border-rose-500/30 rounded-xl shadow-2xl overflow-hidden p-6 space-y-4 animate-fade-in">
             <div className="flex items-center gap-3 text-rose-400">
@@ -939,6 +983,31 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
             <p className="text-xs text-gray-300 leading-relaxed">
               Tem certeza que deseja excluir o contrato <strong className="text-white">{deletingContract.title}</strong>? Esta ação removerá o contrato e todos os seus registros associados do banco de dados.
             </p>
+            {relatedCounts.length > 0 && (
+              <div className="bg-rose-950/30 border border-rose-500/20 rounded-lg p-3 space-y-1.5">
+                <p className="text-xs font-semibold text-rose-300 uppercase tracking-wider">
+                  Isto também vai apagar permanentemente:
+                </p>
+                <ul className="text-xs text-gray-300 space-y-0.5 list-disc list-inside">
+                  {relatedCounts.map((item) => (
+                    <li key={item.label}>{item.count} {item.label}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-xs text-gray-400">
+                Para confirmar, digite o nome do contrato: <strong className="text-white">{deletingContract.title}</strong>
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                autoFocus
+                className="w-full px-3 py-2 text-sm bg-slate-950 border border-rose-500/30 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:border-rose-500"
+                placeholder={deletingContract.title}
+              />
+            </div>
             <div className="flex justify-end gap-3 pt-3 border-t border-[#1e293b]">
               <button
                 type="button"
@@ -950,15 +1019,16 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
               <button
                 type="button"
                 onClick={handleDelete}
-                disabled={isPending}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50 rounded-lg shadow-lg shadow-rose-600/20 transition-colors"
+                disabled={isPending || !isConfirmed}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-600 rounded-lg shadow-lg shadow-rose-600/20 transition-colors"
               >
                 {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Excluir Definitivamente'}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

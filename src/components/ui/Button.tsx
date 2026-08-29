@@ -24,12 +24,12 @@ export default function Button({
   ...props
 }: ButtonProps) {
   const variantStyles = {
-    primary: 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 border border-blue-500/30',
-    secondary: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700',
-    success: 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 border border-emerald-500/30',
-    danger: 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 border border-rose-500/30',
-    amber: 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-600/20 border border-amber-500/30',
-    ghost: 'bg-transparent hover:bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-transparent',
+    primary: 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 border border-blue-500/30 focus-visible:ring-blue-500',
+    secondary: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 focus-visible:ring-slate-400',
+    success: 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 border border-emerald-500/30 focus-visible:ring-emerald-500',
+    danger: 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 border border-rose-500/30 focus-visible:ring-rose-500',
+    amber: 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-600/20 border border-amber-500/30 focus-visible:ring-amber-500',
+    ghost: 'bg-transparent hover:bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-transparent focus-visible:ring-slate-400',
   };
 
   const sizeStyles = {
@@ -41,7 +41,7 @@ export default function Button({
   return (
     <button
       disabled={disabled || isLoading}
-      className={`inline-flex items-center justify-center transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100 ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
+      className={`inline-flex items-center justify-center transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#070b13] ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
       {...props}
     >
       {isLoading ? (

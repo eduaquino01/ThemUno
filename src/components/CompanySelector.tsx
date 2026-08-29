@@ -162,7 +162,7 @@ export default function CompanySelector({ onCompanyChange }: CompanySelectorProp
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
                       <div className="truncate">
                         <span className="block truncate font-bold text-white">{c.name}</span>
-                        <span className="text-[9px] text-slate-400 font-mono">{c.tax_id || c.code}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{c.tax_id || c.code}</span>
                       </div>
                     </div>
                     {isSelected && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
@@ -216,7 +216,7 @@ export default function CompanySelector({ onCompanyChange }: CompanySelectorProp
                   placeholder="Ex: ThemUno Logística & Supply S.A."
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-[#1e293b] rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 bg-slate-950 border border-[#1e293b] rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 />
               </div>
 
@@ -228,7 +228,7 @@ export default function CompanySelector({ onCompanyChange }: CompanySelectorProp
                     placeholder="00.000.000/0001-00"
                     value={formData.tax_id}
                     onChange={e => setFormData({ ...formData, tax_id: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-[#1e293b] rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono"
+                    className="w-full px-3 py-2 bg-slate-950 border border-[#1e293b] rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 font-mono"
                   />
                 </div>
 

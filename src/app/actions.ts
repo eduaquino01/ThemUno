@@ -185,7 +185,7 @@ export async function getContractById(id: string) {
         change_requests: { orderBy: { created_at: 'desc' } },
         risks: { orderBy: { risk_level: 'desc' } },
         invoices: { orderBy: { issue_date: 'desc' } },
-        credentials: { orderBy: { created_at: 'desc' } },
+        credentials: { orderBy: { created_at: 'desc' }, select: CREDENTIAL_SAFE_SELECT },
       }
     });
     return serializeContract(contract);
@@ -216,15 +216,15 @@ export async function createContract(data: z.input<typeof ContractSchema>) {
   return serializeContract(contract);
 }
 
-export async function updateContract(id: string, data: any) {
-  const updateData: any = { ...data };
-  if (updateData.start_date) updateData.start_date = new Date(updateData.start_date);
-  if (updateData.end_date) updateData.end_date = new Date(updateData.end_date);
-  if (updateData.total_value !== undefined) updateData.total_value = Number(updateData.total_value);
+export async function updateContract(id: string, data: unknown) {
+  // Mesmas regras de createContract, mas com todos os campos opcionais —
+  // permite atualizar só um campo (ex.: { status }) sem exigir o objeto
+  // inteiro, e sem abrir mão da validação (datas, enums, valores não-negativos).
+  const validated = ContractSchema.partial().parse(data);
 
   const contract = await prisma.contract.update({
     where: { id },
-    data: updateData,
+    data: validated,
     include: {
       milestones: true,
       change_requests: true,
@@ -323,29 +323,42 @@ export async function updateChangeRequestStatus(id: string, status: ChangeReques
   if (!currentCr) throw new Error("Change request not found");
 
   let amendmentContractId: string | null = null;
+  const financialImpact = Number(currentCr.financial_impact);
 
-  if (status === 'APPROVED' && currentCr.status !== 'APPROVED') {
+  // Só gera um contrato de aditivo automático quando a mudança realmente
+  // adiciona valor faturável. Uma mudança com impacto zero ou negativo (ex.:
+  // redução de escopo) ainda pode ser aprovada normalmente — só não cria um
+  // contrato com total_value negativo, que nunca passaria pela validação
+  // usada em qualquer outro fluxo de criação de contrato.
+  if (status === 'APPROVED' && currentCr.status !== 'APPROVED' && financialImpact > 0) {
     const parentContract = currentCr.contract;
-    const amendmentTitle = `Amendment: ${currentCr.title}`;
-    
     const start_date = new Date();
-    const end_date = parentContract.end_date;
 
-    const amendment = await prisma.contract.create({
-      data: {
-        title: amendmentTitle,
-        type: 'AMENDMENT',
-        counterpart: parentContract.counterpart,
-        status: 'ACTIVE',
-        start_date,
-        end_date,
-        auto_renewal: parentContract.auto_renewal,
-        notice_period_days: parentContract.notice_period_days,
-        total_value: currentCr.financial_impact,
-        raw_text_or_url: `Generated from approved change request: ${currentCr.id}`,
-      },
+    if (parentContract.end_date < start_date) {
+      throw new Error(
+        `Não é possível gerar o aditivo automaticamente: o contrato original venceu em ${parentContract.end_date.toLocaleDateString('pt-BR')}. Atualize a vigência do contrato antes de aprovar esta mudança.`
+      );
+    }
+
+    // Passa pela mesma validação (ContractSchema) usada em qualquer outra
+    // criação de contrato, e herda company_id/nature do contrato original
+    // — antes o aditivo nascia sem empresa e sempre como EXPENSE.
+    const amendmentData = ContractSchema.parse({
+      company_id: parentContract.company_id,
+      title: `Amendment: ${currentCr.title}`,
+      type: 'AMENDMENT',
+      nature: parentContract.nature,
+      counterpart: parentContract.counterpart,
+      status: 'ACTIVE',
+      start_date,
+      end_date: parentContract.end_date,
+      auto_renewal: parentContract.auto_renewal,
+      notice_period_days: parentContract.notice_period_days,
+      total_value: financialImpact,
+      raw_text_or_url: `Generated from approved change request: ${currentCr.id}`,
     });
 
+    const amendment = await prisma.contract.create({ data: amendmentData });
     amendmentContractId = amendment.id;
   }
 
@@ -517,10 +530,15 @@ export async function createMonthlyReport(data: z.infer<typeof MonthlyReportSche
   return serializeReport(report);
 }
 
-export async function updateMonthlyReport(id: string, data: Partial<z.infer<typeof MonthlyReportSchema>> & { generated_pdf_url?: string }) {
+const MonthlyReportUpdateSchema = MonthlyReportSchema.partial().extend({
+  generated_pdf_url: z.string().optional(),
+});
+
+export async function updateMonthlyReport(id: string, data: unknown) {
+  const validated = MonthlyReportUpdateSchema.parse(data);
   const report = await prisma.monthlyReport.update({
     where: { id },
-    data: data as any,
+    data: validated,
   });
   revalidatePath('/reports');
   return serializeReport(report);
@@ -539,6 +557,21 @@ const CredentialSchema = z.object({
   login_url: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
+
+// Campos seguros para listagem: NUNCA inclui secret_value.
+// O segredo só é buscado sob demanda por getCredentialSecret(), quando o
+// usuário explicitamente pede para revelar ou copiar uma credencial.
+const CREDENTIAL_SAFE_SELECT = {
+  id: true,
+  contract_id: true,
+  type: true,
+  title: true,
+  username: true,
+  login_url: true,
+  notes: true,
+  created_at: true,
+  updated_at: true,
+} as const;
 
 export async function createContractCredential(data: z.input<typeof CredentialSchema>) {
   const validated = CredentialSchema.parse(data);
@@ -564,7 +597,8 @@ export async function getStandaloneCredentials() {
   try {
     const creds = await prisma.contractCredential.findMany({
       where: { contract_id: null },
-      orderBy: { created_at: 'desc' }
+      orderBy: { created_at: 'desc' },
+      select: CREDENTIAL_SAFE_SELECT,
     });
     return creds.map(serializeCredential);
   } catch (error) {
@@ -573,12 +607,31 @@ export async function getStandaloneCredentials() {
   }
 }
 
+// Busca o segredo de UMA credencial, sob demanda. Chamado apenas quando o
+// usuário clica em "revelar" ou "copiar" no cofre — nunca como parte de uma
+// listagem, para que a senha não trafegue para o cliente antes de ser pedida.
+export async function getCredentialSecret(id: string): Promise<string> {
+  const credential = await prisma.contractCredential.findUnique({
+    where: { id },
+    select: { secret_value: true },
+  });
+  if (!credential) {
+    throw new Error('Credencial não encontrada.');
+  }
+  return credential.secret_value;
+}
+
 export async function getDashboardData() {
   try {
-    const contracts = await getContracts();
-    const changeRequests = await getChangeRequests();
-    const invoices = await getInvoices();
-    const standaloneCredentials = await getStandaloneCredentials();
+    // As quatro consultas são independentes entre si — rodá-las em paralelo
+    // (em vez de uma await por vez, em série) reduz o tempo total de resposta
+    // ao tempo da mais lenta delas, não à soma de todas.
+    const [contracts, changeRequests, invoices, standaloneCredentials] = await Promise.all([
+      getContracts(),
+      getChangeRequests(),
+      getInvoices(),
+      getStandaloneCredentials(),
+    ]);
 
     const milestones = contracts.flatMap((c: any) => c.milestones || []);
     const risks = contracts.flatMap((c: any) => c.risks || []);
