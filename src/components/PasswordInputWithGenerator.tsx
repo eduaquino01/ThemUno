@@ -19,6 +19,24 @@ export default function PasswordInputWithGenerator({
   const [isVisible, setIsVisible] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Gera um índice aleatório no intervalo [0, max) usando o gerador
+  // criptograficamente seguro do navegador. Math.random() não tem garantia
+  // de imprevisibilidade e não deveria gerar nada usado como segredo.
+  const secureRandomIndex = (max: number) => {
+    const array = new Uint32Array(1);
+    crypto.getRandomValues(array);
+    return array[0] % max;
+  };
+
+  const secureShuffle = <T,>(items: T[]): T[] => {
+    const result = [...items];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = secureRandomIndex(i + 1);
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  };
+
   // Generate a random 16-character high entropy password
   const generateStrongPassword = () => {
     const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -27,21 +45,20 @@ export default function PasswordInputWithGenerator({
     const symbols = '!@#$%^&*()_+-=[]{}|;:,.<>?';
 
     const all = uppercase + lowercase + numbers + symbols;
-    let pwd = '';
-    
+    const chars: string[] = [];
+
     // Ensure at least one character from each set
-    pwd += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
-    pwd += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
-    pwd += numbers.charAt(Math.floor(Math.random() * numbers.length));
-    pwd += symbols.charAt(Math.floor(Math.random() * symbols.length));
+    chars.push(uppercase.charAt(secureRandomIndex(uppercase.length)));
+    chars.push(lowercase.charAt(secureRandomIndex(lowercase.length)));
+    chars.push(numbers.charAt(secureRandomIndex(numbers.length)));
+    chars.push(symbols.charAt(secureRandomIndex(symbols.length)));
 
     for (let i = 4; i < 16; i++) {
-      pwd += all.charAt(Math.floor(Math.random() * all.length));
+      chars.push(all.charAt(secureRandomIndex(all.length)));
     }
 
-    // Shuffle password
-    pwd = pwd.split('').sort(() => 0.5 - Math.random()).join('');
-    
+    const pwd = secureShuffle(chars).join('');
+
     onChange(pwd);
     setIsVisible(true);
   };
@@ -74,7 +91,7 @@ export default function PasswordInputWithGenerator({
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full pl-3 pr-24 py-2.5 bg-slate-950 border border-[#1e293b] rounded-xl text-white text-xs font-mono focus:outline-none focus:border-blue-500 transition-colors"
+          className="w-full pl-3 pr-24 py-2.5 bg-slate-950 border border-[#1e293b] rounded-xl text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
         />
 
         <div className="absolute right-2 flex items-center gap-1">

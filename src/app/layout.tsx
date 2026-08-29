@@ -4,6 +4,8 @@ import './globals.css';
 import Link from 'next/link';
 import GlobalHeader from '@/components/GlobalHeader';
 import SidebarNav from '@/components/SidebarNav';
+import { ToastProvider } from '@/components/ui/ToastProvider';
+import { ConfirmProvider } from '@/components/ui/ConfirmProvider';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -35,6 +37,8 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}>
       <body className="h-screen w-screen flex overflow-hidden bg-[#070b13] text-[#f1f5f9] font-sans antialiased">
+        <ToastProvider>
+        <ConfirmProvider>
         {/* SIDEBAR NAVIGATION */}
         <SidebarNav />
 
@@ -50,6 +54,8 @@ export default function RootLayout({
             {children}
           </div>
         </main>
+        </ConfirmProvider>
+        </ToastProvider>
       </body>
     </html>
   );

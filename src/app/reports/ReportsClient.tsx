@@ -20,6 +20,7 @@ import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { useToast } from '@/components/ui/ToastProvider';
 
 interface ReportsClientProps {
   initialReports: any[];
@@ -27,6 +28,7 @@ interface ReportsClientProps {
 
 export default function ReportsClient({ initialReports }: ReportsClientProps) {
   const router = useRouter();
+  const toast = useToast();
   const [isPending, startTransition] = useTransition();
 
   // Log feed input state
@@ -70,7 +72,7 @@ export default function ReportsClient({ initialReports }: ReportsClientProps) {
   // Compiler Handler
   const handleCompileReport = () => {
     if (performedList.length === 0 || plannedList.length === 0) {
-      alert('Por favor insira pelo menos uma atividade realizada e uma planejada.');
+      toast.error('Por favor insira pelo menos uma atividade realizada e uma planejada.');
       return;
     }
 
@@ -92,7 +94,7 @@ export default function ReportsClient({ initialReports }: ReportsClientProps) {
         setPlannedList([]);
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao consolidar relatório.');
+        toast.error(err.message || 'Erro ao consolidar relatório.');
       }
     });
   };
@@ -125,7 +127,7 @@ export default function ReportsClient({ initialReports }: ReportsClientProps) {
                 type="month" 
                 value={period}
                 onChange={(e) => setPeriod(e.target.value)}
-                className="bg-slate-950 border border-[#1e293b] text-white text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500"
+                className="bg-slate-950 border border-[#1e293b] text-white text-xs rounded px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
               />
             </div>
           </div>
@@ -140,7 +142,7 @@ export default function ReportsClient({ initialReports }: ReportsClientProps) {
                 value={currentPerformedInput}
                 onChange={(e) => setCurrentPerformedInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addPerformedActivity()}
-                className="flex-1 px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                className="flex-1 px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
               />
               <Button 
                 variant="primary" 
@@ -178,7 +180,7 @@ export default function ReportsClient({ initialReports }: ReportsClientProps) {
                 value={currentPlannedInput}
                 onChange={(e) => setCurrentPlannedInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addPlannedActivity()}
-                className="flex-1 px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                className="flex-1 px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
               />
               <Button 
                 variant="primary" 

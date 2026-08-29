@@ -11,6 +11,7 @@ import {
   ClipboardList,
   UserCheck,
   Sparkles,
+  Landmark,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -58,6 +59,12 @@ export default function SidebarNav() {
       badgeBg: 'bg-emerald-500/20 text-emerald-300',
     },
     {
+      href: '/finance',
+      label: 'Financeiro',
+      icon: Landmark,
+      badgeBg: 'bg-cyan-500/20 text-cyan-300',
+    },
+    {
       href: '/reports',
       label: 'Relatórios Mensais',
       icon: ClipboardList,
@@ -72,7 +79,7 @@ export default function SidebarNav() {
       {/* TOGGLE COLLAPSE BUTTON */}
       <button
         onClick={toggleCollapse}
-        className="absolute -right-3.5 top-7 z-30 p-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 shadow-xl transition-all hover:scale-110"
+        className="absolute -right-3.5 top-7 z-30 p-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 shadow-xl transition-all hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090f1e]"
         title={isCollapsed ? 'Expandir Menu' : 'Encolher Menu'}
       >
         {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-blue-400" /> : <ChevronLeft className="w-3.5 h-3.5 text-blue-400" />}
@@ -103,7 +110,7 @@ export default function SidebarNav() {
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-blue-400 mt-1">
                 CLMS ENTERPRISE
               </p>
-              <span className="text-[9px] text-slate-400 font-medium block">
+              <span className="text-[10px] text-slate-400 font-medium block">
                 Governance & Vault v2.0
               </span>
             </div>
@@ -122,7 +129,7 @@ export default function SidebarNav() {
               key={item.href}
               href={item.href}
               title={isCollapsed ? item.label : undefined}
-              className={`flex items-center gap-3 py-2 rounded-full text-xs transition-all duration-200 group relative ${
+              className={`flex items-center gap-3 py-2 rounded-full text-xs transition-all duration-200 group relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090f1e] ${
                 isCollapsed ? 'px-1.5 justify-center' : 'px-3'
               } ${
                 isActive

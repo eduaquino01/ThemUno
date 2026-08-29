@@ -28,6 +28,7 @@ import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { useToast } from '@/components/ui/ToastProvider';
 
 interface GovernanceClientProps {
   initialContracts: any[];
@@ -39,6 +40,7 @@ export default function GovernanceClient({
   initialChangeRequests 
 }: GovernanceClientProps) {
   const router = useRouter();
+  const toast = useToast();
   const [isPending, startTransition] = useTransition();
 
   // Selected sub-section within page
@@ -101,7 +103,7 @@ export default function GovernanceClient({
         await updateChangeRequestStatus(crId, 'APPROVED');
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao aprovar mudança.');
+        toast.error(err.message || 'Erro ao aprovar mudança.');
       }
     });
   };
@@ -112,7 +114,7 @@ export default function GovernanceClient({
         await updateChangeRequestStatus(crId, 'REJECTED');
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao rejeitar mudança.');
+        toast.error(err.message || 'Erro ao rejeitar mudança.');
       }
     });
   };
@@ -123,7 +125,7 @@ export default function GovernanceClient({
         await updateMilestoneAcceptance(milestoneId, 'ACCEPTED');
         router.refresh();
       } catch (err: any) {
-        alert(err.message || 'Erro ao homologar marco.');
+        toast.error(err.message || 'Erro ao homologar marco.');
       }
     });
   };
@@ -275,7 +277,7 @@ export default function GovernanceClient({
                       <span className="text-xs px-2.5 py-0.5 rounded bg-slate-900 border border-[#1e293b] text-gray-300 font-bold">
                         {cr.contract?.title || 'Contrato'}
                       </span>
-                      <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold uppercase border ${
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold uppercase border ${
                         cr.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                         cr.status === 'REJECTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                         'bg-amber-500/10 text-amber-400 border-amber-500/20'
@@ -379,7 +381,7 @@ export default function GovernanceClient({
                   required
                   value={formData.contract_id}
                   onChange={(e) => setFormData({ ...formData, contract_id: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                 >
                   <option value="">Selecione um contrato...</option>
                   {initialContracts.map(c => (
@@ -398,7 +400,7 @@ export default function GovernanceClient({
                     type="text" required placeholder="Ex: Integração extra de banco legados"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -407,7 +409,7 @@ export default function GovernanceClient({
                     type="text" required placeholder="Ex: PM Jane Smith"
                     value={formData.requested_by}
                     onChange={(e) => setFormData({ ...formData, requested_by: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -419,7 +421,7 @@ export default function GovernanceClient({
                   required placeholder="Ex: Detalhamento técnico dos desvios de escopo e novas entregas..."
                   value={formData.scope_impact}
                   onChange={(e) => setFormData({ ...formData, scope_impact: e.target.value })}
-                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500 h-20"
+                  className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 h-20"
                 />
               </div>
 
@@ -431,7 +433,7 @@ export default function GovernanceClient({
                     type="text" required inputMode="decimal" placeholder="Ex: 4.087,69 ou 4087.69"
                     value={formData.financial_impact}
                     onChange={(e) => setFormData({ ...formData, financial_impact: e.target.value })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
 
                   {/* Automatic percentage calculation display */}
@@ -447,7 +449,7 @@ export default function GovernanceClient({
                     type="number" min={0}
                     value={formData.time_impact_days}
                     onChange={(e) => setFormData({ ...formData, time_impact_days: Number(e.target.value) })}
-                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    className="px-3 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
                   />
                 </div>
               </div>

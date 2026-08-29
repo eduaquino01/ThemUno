@@ -36,10 +36,14 @@ import {
   Check
 } from 'lucide-react';
 
-import { createContract, updateContract, deleteContract, createContractCredential, deleteContractCredential } from '@/app/actions';
+import { createContract, updateContract, deleteContract, createContractCredential, deleteContractCredential, getCredentialSecret } from '@/app/actions';
 import { formatCurrency, formatDate, parseNumber } from '@/lib/formatters';
 import { ETP_STANDARD_SECTIONS, TR_STANDARD_SECTIONS } from './lib/etpTrTemplates';
 import PasswordInputWithGenerator from '@/components/PasswordInputWithGenerator';
+import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
+import Pagination from '@/components/ui/Pagination';
+import EmptyState from '@/components/ui/EmptyState';
 
 type TabType = 'overview' | 'contracts' | 'milestones' | 'changes' | 'risks' | 'invoices' | 'etp_tr' | 'vault';
 
@@ -56,8 +60,9 @@ interface DashboardClientProps {
 
 export default function DashboardClient({ initialData }: DashboardClientProps) {
   const router = useRouter();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
 
   useEffect(() => {
@@ -106,6 +111,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
   const [showAddContractModal, setShowAddContractModal] = useState<boolean>(false);
   const [editingContract, setEditingContract] = useState<any | null>(null);
   const [deletingContract, setDeletingContract] = useState<any | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   // Edit form state
   const [editContractForm, setEditContractForm] = useState({
@@ -164,6 +170,14 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [vaultFilterType, setVaultFilterType] = useState<string>('ALL');
   const [vaultSearch, setVaultSearch] = useState<string>('');
+  const VAULT_PAGE_SIZE = 60;
+  const [vaultPage, setVaultPage] = useState(1);
+  useEffect(() => {
+    setVaultPage(1);
+  }, [vaultFilterType, vaultSearch]);
+  // Segredos revelados sob demanda (nunca chegam do carregamento inicial da página)
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
+  const [revealingId, setRevealingId] = useState<string | null>(null);
 
   const handleCopySecret = (id: string, text: string) => {
     if (!text) return;
@@ -172,8 +186,39 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const toggleSecretVisibility = (id: string) => {
-    setVisibleSecrets((prev) => ({ ...prev, [id]: !prev[id] }));
+  // Busca o segredo no servidor na primeira vez que é revelado/copiado e
+  // mantém em cache local só para esta sessão da página.
+  const revealCredential = async (id: string): Promise<string | null> => {
+    if (revealedSecrets[id]) return revealedSecrets[id];
+    setRevealingId(id);
+    try {
+      const secret = await getCredentialSecret(id);
+      setRevealedSecrets((prev) => ({ ...prev, [id]: secret }));
+      return secret;
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao revelar credencial.');
+      return null;
+    } finally {
+      setRevealingId(null);
+    }
+  };
+
+  const toggleSecretVisibility = async (id: string) => {
+    if (visibleSecrets[id]) {
+      setVisibleSecrets((prev) => ({ ...prev, [id]: false }));
+      return;
+    }
+    const secret = await revealCredential(id);
+    if (secret !== null) {
+      setVisibleSecrets((prev) => ({ ...prev, [id]: true }));
+    }
+  };
+
+  const handleCopyCredentialSecret = async (id: string) => {
+    const secret = await revealCredential(id);
+    if (secret !== null) {
+      handleCopySecret(id, secret);
+    }
   };
 
   const [showGlobalCredentialModal, setShowGlobalCredentialModal] = useState(false);
@@ -205,6 +250,10 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
       });
 
       if (created) {
+        // O usuário acabou de digitar esse segredo neste formulário — não há
+        // problema em já deixá-lo disponível localmente para "revelar" sem
+        // precisar buscar de novo no servidor.
+        setRevealedSecrets(prev => ({ ...prev, [created.id]: globalCredentialForm.secret_value }));
         if (targetContractId) {
           setContracts(prev => prev.map(c => {
             if (c.id === targetContractId) {
@@ -229,7 +278,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
       });
       router.refresh();
     } catch (err: any) {
-      alert(err.message || 'Erro ao salvar credencial.');
+      toast.error(err.message || 'Erro ao salvar credencial.');
     }
   };
   const pendingInvoiced = invoices.reduce((sum, i) => sum + (i.status === 'ISSUED' || i.status === 'PENDING_ACCEPTANCE' ? (i.amount || 0) : 0), 0);
@@ -237,15 +286,6 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
 
   const acceptedMilestonesCount = milestones.filter(m => m.acceptance_status === 'ACCEPTED').length;
   const criticalRisksCount = risks.filter(r => r.risk_level === 'CRITICAL' || r.risk_level === 'HIGH').length;
-
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-    if (!isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  };
 
   const searchedContracts = filteredContracts.filter(c => {
     const matchesFilter = contractFilter === 'ALL' || c.type === contractFilter;
@@ -285,13 +325,13 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
       setNewContractEnd('');
       router.refresh();
     } catch (err: any) {
-      alert(err.message || 'Erro ao cadastrar contrato.');
+      toast.error(err.message || 'Erro ao cadastrar contrato.');
     }
   };
 
   const generateCompiledDocument = () => {
     if (!etpTitle) {
-      alert('Por favor, informe o título do objeto antes de compilar.');
+      toast.error('Por favor, informe o título do objeto antes de compilar.');
       return;
     }
     let text = `# ${etpMode === 'ETP' ? 'ESTUDO TÉCNICO PRELIMINAR (ETP)' : 'TERMO DE REFERÊNCIA (TR)'}\n`;
@@ -474,16 +514,13 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                 </div>
 
                 {contracts.length === 0 ? (
-                  <div className="py-12 text-center text-slate-400 space-y-3">
-                    <Inbox className="w-12 h-12 mx-auto stroke-1 text-slate-400" />
-                    <p className="text-sm font-medium">Nenhum contrato cadastrado no sistema.</p>
-                    <button
-                      onClick={() => setShowAddContractModal(true)}
-                      className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-500 transition-colors inline-flex items-center"
-                    >
-                      <Plus className="w-4 h-4 mr-1.5" /> Cadastrar Primeiro Contrato
-                    </button>
-                  </div>
+                  <EmptyState
+                    icon={Inbox}
+                    title="Nenhum contrato cadastrado"
+                    description="Cadastre o primeiro contrato para começar a acompanhar vigência, faturamento e riscos."
+                    actionLabel="Cadastrar Primeiro Contrato"
+                    onAction={() => setShowAddContractModal(true)}
+                  />
                 ) : (
                   <div className="space-y-3">
                     {contracts.slice(0, 4).map(contract => (
@@ -591,16 +628,13 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
             </div>
 
             {searchedContracts.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-slate-400 space-y-3">
-                <Inbox className="w-12 h-12 mx-auto stroke-1" />
-                <p className="text-sm font-medium">Nenhum contrato encontrado.</p>
-                <button
-                  onClick={() => setShowAddContractModal(true)}
-                  className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-500 transition-colors inline-flex items-center"
-                >
-                  <Plus className="w-4 h-4 mr-1.5" /> Adicionar Contrato
-                </button>
-              </div>
+              <EmptyState
+                icon={Inbox}
+                title="Nenhum contrato encontrado"
+                description="Nenhum contrato corresponde aos filtros atuais. Ajuste a busca ou cadastre um novo contrato."
+                actionLabel="Adicionar Contrato"
+                onAction={() => setShowAddContractModal(true)}
+              />
             ) : (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
@@ -667,7 +701,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                                 <Pencil className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => setDeletingContract(contract)}
+                                onClick={() => { setDeleteConfirmText(''); setDeletingContract(contract); }}
                                 className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
                                 title="Excluir Contrato"
                               >
@@ -698,10 +732,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
             </div>
 
             {milestones.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-slate-400 space-y-3">
-                <Inbox className="w-12 h-12 mx-auto stroke-1" />
-                <p className="text-sm font-medium">Nenhum entregável ou marco cadastrado.</p>
-              </div>
+              <EmptyState icon={Inbox} title="Nenhum marco cadastrado" description="Nenhum entregável ou marco foi registrado ainda para os contratos existentes." />
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {milestones.map(milestone => (
@@ -732,10 +763,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
             </div>
 
             {changeRequests.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-slate-400 space-y-3">
-                <Inbox className="w-12 h-12 mx-auto stroke-1" />
-                <p className="text-sm font-medium">Nenhuma solicitação de aditivo cadastrada.</p>
-              </div>
+              <EmptyState icon={Inbox} title="Nenhuma solicitação de mudança" description="Nenhuma solicitação de aditivo ou mudança de escopo foi cadastrada ainda." />
             ) : (
               <div className="grid grid-cols-1 gap-4">
                 {changeRequests.map(cr => (
@@ -769,10 +797,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
             </div>
 
             {risks.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-slate-400 space-y-3">
-                <Inbox className="w-12 h-12 mx-auto stroke-1" />
-                <p className="text-sm font-medium">Nenhum risco cadastrado na matriz.</p>
-              </div>
+              <EmptyState icon={Inbox} title="Nenhum risco cadastrado" description="Nenhum risco foi registrado ainda na matriz de riscos dos contratos." />
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {risks.map(r => (
@@ -803,10 +828,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
             </div>
 
             {invoices.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-slate-400 space-y-3">
-                <Inbox className="w-12 h-12 mx-auto stroke-1" />
-                <p className="text-sm font-medium">Nenhuma nota fiscal ou faturamento registrado.</p>
-              </div>
+              <EmptyState icon={Inbox} title="Nenhuma fatura registrada" description="Nenhuma nota fiscal ou faturamento foi registrado ainda." />
             ) : (
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
                 <table className="w-full text-left text-xs border-collapse">
@@ -1046,9 +1068,17 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                 return matchesType && matchesSearch;
               });
 
+              const vaultTotalPages = Math.max(1, Math.ceil(filteredVault.length / VAULT_PAGE_SIZE));
+              const vaultSafePage = Math.min(vaultPage, vaultTotalPages);
+              const pagedVault = filteredVault.slice(
+                (vaultSafePage - 1) * VAULT_PAGE_SIZE,
+                vaultSafePage * VAULT_PAGE_SIZE
+              );
+
               return filteredVault.length > 0 ? (
+                <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {filteredVault.map((cred: any) => {
+                  {pagedVault.map((cred: any) => {
                   const isSecretVisible = visibleSecrets[cred.id];
                   const isCopied = copiedId === cred.id;
 
@@ -1085,7 +1115,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                             )}
                             <button
                               onClick={async () => {
-                                if (confirm('Tem certeza que deseja excluir esta credencial do cofre?')) {
+                                if (await confirmDialog('Tem certeza que deseja excluir esta credencial do cofre?', { tone: 'danger', confirmLabel: 'Excluir' })) {
                                   try {
                                     await deleteContractCredential(cred.id);
                                     setStandaloneCredentials(prev => prev.filter(c => c.id !== cred.id));
@@ -1095,7 +1125,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                                     })));
                                     router.refresh();
                                   } catch (err: any) {
-                                    alert(err.message || 'Erro ao excluir credencial.');
+                                    toast.error(err.message || 'Erro ao excluir credencial.');
                                   }
                                 }
                               }}
@@ -1135,18 +1165,26 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                           </span>
                           <div className="flex items-center gap-2 font-mono font-bold">
                             <span className="tracking-widest">
-                              {isSecretVisible ? cred.secret_value : '••••••••••••'}
+                              {isSecretVisible ? revealedSecrets[cred.id] : '••••••••••••'}
                             </span>
                             <button
                               onClick={() => toggleSecretVisibility(cred.id)}
-                              className="p-1 text-slate-400 hover:text-white"
+                              disabled={revealingId === cred.id}
+                              className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
                               title={isSecretVisible ? 'Ocultar' : 'Revelar'}
                             >
-                              {isSecretVisible ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5 text-blue-400" />}
+                              {revealingId === cred.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                              ) : isSecretVisible ? (
+                                <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5 text-blue-400" />
+                              )}
                             </button>
                             <button
-                              onClick={() => handleCopySecret(cred.id, cred.secret_value)}
-                              className="p-1 text-slate-400 hover:text-white"
+                              onClick={() => handleCopyCredentialSecret(cred.id)}
+                              disabled={revealingId === cred.id}
+                              className="p-1 text-slate-400 hover:text-white disabled:opacity-50"
                               title="Copiar Segredo"
                             >
                               {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -1171,17 +1209,24 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                     </div>
                   );
                 })}
-              </div>
+                </div>
+                <Pagination
+                  page={vaultSafePage}
+                  pageSize={VAULT_PAGE_SIZE}
+                  totalItems={filteredVault.length}
+                  onPageChange={setVaultPage}
+                />
+                </>
             ) : (
-              <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
-                <Lock className="w-12 h-12 text-slate-400 dark:text-slate-600 mx-auto" />
-                <h4 className="font-bold text-slate-800 dark:text-slate-200 text-lg">Nenhuma Credencial Encontrada</h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                  {vaultSearch || vaultFilterType !== 'ALL' 
+              <EmptyState
+                icon={Lock}
+                title="Nenhuma credencial encontrada"
+                description={
+                  vaultSearch || vaultFilterType !== 'ALL'
                     ? 'Nenhum resultado encontrado para os filtros selecionados. Tente alterar a busca.'
-                    : 'Ainda não há credenciais cadastradas nos seus contratos. Clique no botão acima para registrar logins e chaves de API.'}
-                </p>
-              </div>
+                    : 'Ainda não há credenciais cadastradas nos seus contratos. Clique no botão acima para registrar logins e chaves de API.'
+                }
+              />
             );
           })()}
           </div>
@@ -1367,6 +1412,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                   onClick={() => {
                     const c = selectedContract;
                     setSelectedContract(null);
+                    setDeleteConfirmText('');
                     setDeletingContract(c);
                   }}
                   className="px-3 py-2 bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl font-bold text-xs hover:bg-rose-500/20 transition-colors flex items-center gap-1.5"
@@ -1411,7 +1457,7 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
                 setEditingContract(null);
                 router.refresh();
               } catch (err: any) {
-                alert(err.message || 'Erro ao atualizar contrato.');
+                toast.error(err.message || 'Erro ao atualizar contrato.');
               }
             }} className="space-y-4 text-xs">
               <div>
@@ -1498,44 +1544,81 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
       )}
 
       {/* Delete Contract Confirmation Modal */}
-      {deletingContract && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-rose-500/30 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-fade-in">
-            <div className="flex items-center gap-3 text-rose-500">
-              <AlertTriangle className="w-6 h-6 shrink-0" />
-              <h3 className="font-bold text-lg text-slate-900 dark:text-white">Excluir Contrato?</h3>
-            </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Tem certeza que deseja excluir o contrato <strong className="text-slate-900 dark:text-white">{deletingContract.title}</strong>? Esta ação removerá o contrato do banco de dados.
-            </p>
-            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setDeletingContract(null)}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await deleteContract(deletingContract.id);
-                    setContracts((prev) => prev.filter(c => c.id !== deletingContract.id));
-                    setDeletingContract(null);
-                    router.refresh();
-                  } catch (err: any) {
-                    alert(err.message || 'Erro ao excluir contrato.');
-                  }
-                }}
-                className="px-4 py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-500 transition-colors"
-              >
-                Excluir Definitivamente
-              </button>
+      {deletingContract && (() => {
+        const relatedCounts = [
+          { label: 'marco(s)', count: deletingContract.milestones?.length || 0 },
+          { label: 'aditivo(s) / mudança(s) de escopo', count: deletingContract.change_requests?.length || 0 },
+          { label: 'risco(s) registrado(s)', count: deletingContract.risks?.length || 0 },
+          { label: 'fatura(s)', count: deletingContract.invoices?.length || 0 },
+          { label: 'credencial(is) no cofre', count: deletingContract.credentials?.length || 0 },
+        ].filter((item) => item.count > 0);
+        const isConfirmed = deleteConfirmText.trim() === deletingContract.title;
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-rose-500/30 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-fade-in">
+              <div className="flex items-center gap-3 text-rose-500">
+                <AlertTriangle className="w-6 h-6 shrink-0" />
+                <h3 className="font-bold text-lg text-slate-900 dark:text-white">Excluir Contrato?</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Tem certeza que deseja excluir o contrato <strong className="text-slate-900 dark:text-white">{deletingContract.title}</strong>? Esta ação removerá o contrato do banco de dados.
+              </p>
+              {relatedCounts.length > 0 && (
+                <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-500/20 rounded-lg p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-rose-600 dark:text-rose-300 uppercase tracking-wider">
+                    Isto também vai apagar permanentemente:
+                  </p>
+                  <ul className="text-xs text-slate-600 dark:text-gray-300 space-y-0.5 list-disc list-inside">
+                    {relatedCounts.map((item) => (
+                      <li key={item.label}>{item.count} {item.label}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-500 dark:text-gray-400">
+                  Para confirmar, digite o nome do contrato: <strong className="text-slate-900 dark:text-white">{deletingContract.title}</strong>
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  autoFocus
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-rose-300 dark:border-rose-500/30 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:border-rose-500"
+                  placeholder={deletingContract.title}
+                />
+              </div>
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setDeletingContract(null)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!isConfirmed) return;
+                    try {
+                      await deleteContract(deletingContract.id);
+                      setContracts((prev) => prev.filter(c => c.id !== deletingContract.id));
+                      setDeletingContract(null);
+                      router.refresh();
+                    } catch (err: any) {
+                      toast.error(err.message || 'Erro ao excluir contrato.');
+                    }
+                  }}
+                  disabled={!isConfirmed}
+                  className="px-4 py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-600 transition-colors"
+                >
+                  Excluir Definitivamente
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* Global Credential Creation Modal */}
       {showGlobalCredentialModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
