@@ -44,4 +44,15 @@ next-env.d.ts
 *.db
 *.sqlite
 *.sqlite3
+dev-backup*.db
 
+# financial spreadsheets & bank exports
+*.xlsx
+*.xls
+*.ofx
+*.csv
+
+# secrets & keys
+*.key
+*.pem
+.env*
