@@ -573,11 +573,27 @@ const CREDENTIAL_SAFE_SELECT = {
   updated_at: true,
 } as const;
 
+import { encryptSecret, decryptSecret } from '@/lib/encryption';
+import { logAudit } from '@/lib/audit';
+
 export async function createContractCredential(data: z.input<typeof CredentialSchema>) {
   const validated = CredentialSchema.parse(data);
+  const encryptedSecret = encryptSecret(validated.secret_value);
   const credential = await prisma.contractCredential.create({
-    data: validated,
+    data: {
+      ...validated,
+      secret_value: encryptedSecret,
+    },
   });
+  
+  await logAudit({
+    module: 'VAULT',
+    entityType: 'ContractCredential',
+    entityId: credential.id,
+    action: 'CREATE',
+    companyId: credential.contract_id ? (await prisma.contract.findUnique({ where: { id: credential.contract_id }, select: { company_id: true } }))?.company_id : null,
+  });
+
   revalidatePath(`/contracts/${validated.contract_id}`);
   return serializeCredential(credential);
 }
@@ -607,18 +623,26 @@ export async function getStandaloneCredentials() {
   }
 }
 
-// Busca o segredo de UMA credencial, sob demanda. Chamado apenas quando o
-// usuário clica em "revelar" ou "copiar" no cofre — nunca como parte de uma
-// listagem, para que a senha não trafegue para o cliente antes de ser pedida.
+// Busca e descriptografa o segredo de UMA credencial, sob demanda.
+// Registra auditoria ao revelar a credencial.
 export async function getCredentialSecret(id: string): Promise<string> {
   const credential = await prisma.contractCredential.findUnique({
     where: { id },
-    select: { secret_value: true },
+    select: { id: true, secret_value: true, contract_id: true, title: true },
   });
   if (!credential) {
     throw new Error('Credencial não encontrada.');
   }
-  return credential.secret_value;
+
+  await logAudit({
+    module: 'VAULT',
+    entityType: 'ContractCredential',
+    entityId: credential.id,
+    action: 'REVEAL_SECRET',
+    reason: `Revelação da credencial: ${credential.title}`,
+  });
+
+  return decryptSecret(credential.secret_value);
 }
 
 export async function getDashboardData() {

@@ -97,47 +97,113 @@ enum FinancialImportStatus {
   FAILED
 }
 
+enum UserRole {
+  ADMIN
+  DIRETORIA
+  FINANCEIRO
+  CONTRATOS
+  CONSULTA
+}
+
+model User {
+  id              String        @id @default(uuid())
+  name            String
+  email           String        @unique
+  password_hash   String
+  role            UserRole      @default(CONSULTA)
+  is_active       Boolean       @default(true)
+  last_login_at   DateTime?
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  user_companies  UserCompany[]
+  sessions        Session[]
+  audit_logs      AuditLog[]
+}
+
+model UserCompany {
+  id         String   @id @default(uuid())
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company_id String
+  company    Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+
+  @@unique([user_id, company_id])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  user_id      String
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  token        String   @unique
+  expires_at   DateTime
+  created_at   DateTime @default(now())
+}
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  user_id         String?
+  user            User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  company_id      String?
+  company         Company? @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  module          String
+  entity_type     String
+  entity_id       String?
+  action          String
+  previous_values String?  // JSON string
+  new_values      String?  // JSON string
+  reason          String?
+  created_at      DateTime @default(now())
+
+  @@index([user_id, created_at])
+  @@index([company_id, module])
+}
+
 model Company {
-  id          String     @id @default(uuid())
-  name        String
-  code        String     @unique
-  tax_id      String?
-  color       String     @default("#3b82f6")
-  is_holding  Boolean    @default(false)
-  created_at  DateTime   @default(now())
-  contracts   Contract[]
-  bank_accounts BankAccount[]
+  id                   String              @id @default(uuid())
+  name                 String
+  code                 String              @unique
+  tax_id               String?
+  color                String              @default("#3b82f6")
+  is_holding           Boolean             @default(false)
+  created_at           DateTime            @default(now())
+  contracts            Contract[]
+  bank_accounts        BankAccount[]
   financial_categories FinancialCategory[]
-  financial_entries FinancialEntry[]
-  financial_imports FinancialImport[]
+  financial_entries    FinancialEntry[]
+  financial_imports    FinancialImport[]
+  monthly_reports      MonthlyReport[]
+  user_companies       UserCompany[]
+  audit_logs           AuditLog[]
 }
 
 model BankAccount {
-  id              String   @id @default(uuid())
+  id              String           @id @default(uuid())
   company_id      String
-  company         Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  company         Company          @relation(fields: [company_id], references: [id], onDelete: Cascade)
   bank_name       String
   branch          String?
   account_number  String?
-  opening_balance Decimal  @default(0)
-  is_active       Boolean  @default(true)
-  created_at      DateTime @default(now())
-  updated_at      DateTime @updatedAt
+  opening_balance Decimal          @default(0)
+  is_active       Boolean          @default(true)
+  created_at      DateTime         @default(now())
+  updated_at      DateTime         @updatedAt
   entries         FinancialEntry[]
 
   @@index([company_id])
 }
 
 model FinancialCategory {
-  id          String          @id @default(uuid())
+  id          String           @id @default(uuid())
   company_id  String
-  company     Company         @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  company     Company          @relation(fields: [company_id], references: [id], onDelete: Cascade)
   name        String
   nature      FinancialNature
-  sort_order  Int             @default(0)
-  is_active   Boolean         @default(true)
-  created_at  DateTime        @default(now())
-  updated_at  DateTime        @updatedAt
+  sort_order  Int              @default(0)
+  is_active   Boolean          @default(true)
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @updatedAt
   entries     FinancialEntry[]
 
   @@unique([company_id, nature, name])
@@ -145,18 +211,18 @@ model FinancialCategory {
 }
 
 model FinancialImport {
-  id             String                @id @default(uuid())
-  company_id     String
-  company        Company               @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  file_name      String
-  source_key     String
-  status         FinancialImportStatus @default(PROCESSING)
-  imported_rows  Int                   @default(0)
-  ignored_rows   Int                   @default(0)
-  warning_rows   Int                   @default(0)
-  notes          String?
-  created_at     DateTime              @default(now())
-  entries        FinancialEntry[]
+  id            String                @id @default(uuid())
+  company_id    String
+  company       Company               @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  file_name     String
+  source_key    String
+  status        FinancialImportStatus @default(PROCESSING)
+  imported_rows Int                   @default(0)
+  ignored_rows  Int                   @default(0)
+  warning_rows  Int                   @default(0)
+  notes         String?
+  created_at    DateTime              @default(now())
+  entries       FinancialEntry[]
 
   @@unique([company_id, source_key])
   @@index([company_id, created_at])
@@ -177,6 +243,9 @@ model FinancialEntry {
   account_name         String
   description          String?
   document_number      String?
+  sankhya_nufin        String?           // Sankhya Unique Financial Identifier
+  settlement_status    String            @default("OPEN") // OPEN, SETTLED, CANCELLED, DISPUTED
+  reconciliation_status String           @default("UNRECONCILED") // UNRECONCILED, RECONCILED, MANUAL
   period_start         DateTime
   period_end           DateTime
   due_date             DateTime?
@@ -186,54 +255,58 @@ model FinancialEntry {
   is_reconciled        Boolean           @default(false)
   source               String            @default("MANUAL")
   source_ref           String?
+  deleted_at           DateTime?
+  deleted_by           String?
   created_at           DateTime          @default(now())
   updated_at           DateTime          @updatedAt
 
+  @@unique([company_id, sankhya_nufin])
   @@index([company_id, period_start, scenario])
   @@index([company_id, nature, category_id])
   @@index([import_id])
 }
 
 model Contract {
-  id                 String          @id @default(uuid())
+  id                 String               @id @default(uuid())
   company_id         String?
-  company            Company?        @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  company            Company?             @relation(fields: [company_id], references: [id], onDelete: SetNull)
   title              String
   type               ContractType
-  nature             ContractNature  @default(EXPENSE)
+  nature             ContractNature       @default(EXPENSE)
   counterpart        String
-  status             ContractStatus  @default(DRAFT)
+  status             ContractStatus       @default(DRAFT)
   start_date         DateTime
   end_date           DateTime
-  auto_renewal       Boolean         @default(false)
-  notice_period_days Int             @default(30)
+  auto_renewal       Boolean              @default(false)
+  notice_period_days Int                  @default(30)
   total_value        Decimal
   raw_text_or_url    String?
-  created_at         DateTime        @default(now())
-  updated_at         DateTime        @updatedAt
+  deleted_at         DateTime?
+  deleted_by         String?
+  created_at         DateTime             @default(now())
+  updated_at         DateTime             @updatedAt
 
   milestones         Milestone[]
-  change_requests    ChangeRequest[] @relation("ContractChangeRequests")
+  change_requests    ChangeRequest[]      @relation("ContractChangeRequests")
   risks              ContractRisk[]
   invoices           Invoice[]
   credentials        ContractCredential[]
 
-  // Self-relation: Amendments originate from change requests on contracts
-  amendments         ChangeRequest[] @relation("AmendmentContract")
+  amendments         ChangeRequest[]      @relation("AmendmentContract")
 }
 
 model Milestone {
-  id                 String           @id @default(uuid())
-  contract_id        String
-  contract           Contract         @relation(fields: [contract_id], references: [id], onDelete: Cascade)
-  title              String
-  scope_description  String
-  due_date           DateTime
+  id                  String           @id @default(uuid())
+  contract_id         String
+  contract            Contract         @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  title               String
+  scope_description   String
+  due_date            DateTime
   acceptance_criteria String
-  acceptance_status  AcceptanceStatus @default(PENDING)
-  billing_value      Decimal
-  invoice_id         String?          // Associated invoice id
-  invoices           Invoice[]        // Invoice relationship
+  acceptance_status   AcceptanceStatus @default(PENDING)
+  billing_value       Decimal
+  invoice_id          String?
+  invoices            Invoice[]
 }
 
 model ChangeRequest {
@@ -260,7 +333,7 @@ model ContractRisk {
   risk_level      RiskLevel
   description     String
   mitigation_plan String
-  status          String       // E.g. "IDENTIFIED", "MITIGATED", "MONITORED"
+  status          String
   created_at      DateTime     @default(now())
   updated_at      DateTime     @updatedAt
 }
@@ -279,29 +352,35 @@ model Invoice {
   payment_proof_url String?
   created_at        DateTime      @default(now())
   updated_at        DateTime      @updatedAt
+
+  @@index([contract_id, invoice_number])
 }
 
 model ContractCredential {
-  id            String          @id @default(uuid())
-  contract_id   String?
-  contract      Contract?       @relation(fields: [contract_id], references: [id], onDelete: Cascade)
-  type          CredentialType  @default(PORTAL_LOGIN)
-  title         String
-  username      String?
-  secret_value  String
-  login_url     String?
-  notes         String?
-  created_at    DateTime        @default(now())
-  updated_at    DateTime        @updatedAt
+  id           String         @id @default(uuid())
+  contract_id  String?
+  contract     Contract?      @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  type         CredentialType @default(PORTAL_LOGIN)
+  title        String
+  username     String?
+  secret_value String
+  login_url    String?
+  notes        String?
+  created_at   DateTime       @default(now())
+  updated_at   DateTime       @updatedAt
 }
 
 model MonthlyReport {
-  id                 String              @id @default(uuid())
-  period_month_year  String              // Format: "YYYY-MM"
-  performed_activities Json              // JSON mapping activities log
-  next_month_plan    Json                // JSON mapping planned items
-  generated_pdf_url  String?
-  status             MonthlyReportStatus @default(DRAFT)
-  created_at         DateTime            @default(now())
-  updated_at         DateTime            @updatedAt
+  id                   String              @id @default(uuid())
+  company_id           String?
+  company              Company?            @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  period_month_year    String              // Format: "YYYY-MM"
+  performed_activities Json
+  next_month_plan      Json
+  generated_pdf_url    String?
+  status               MonthlyReportStatus @default(DRAFT)
+  created_at           DateTime            @default(now())
+  updated_at           DateTime            @updatedAt
+
+  @@unique([company_id, period_month_year])
 }

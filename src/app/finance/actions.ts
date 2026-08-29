@@ -187,6 +187,7 @@ export async function importFinancialPlan(input: unknown) {
         account_name: row.account,
         description: row.description,
         document_number: row.document_number,
+        sankhya_nufin: row.source_ref?.startsWith('SANKHYA:') ? row.source_ref.replace('SANKHYA:', '') : null,
         period_start: new Date(`${row.period_start}T12:00:00.000Z`),
         period_end: new Date(`${row.period_end}T12:00:00.000Z`),
         due_date: row.due_date ? new Date(`${row.due_date}T12:00:00.000Z`) : null,
