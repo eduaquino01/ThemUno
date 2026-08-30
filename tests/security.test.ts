@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { encryptSecret, decryptSecret, maskSecret } from '../src/lib/encryption';
-import { hashPassword, comparePassword, ROLE_PERMISSIONS } from '../src/lib/auth';
+import { hashPassword, comparePassword, getFailedLoginState, hashSessionToken, ROLE_PERMISSIONS } from '../src/lib/auth';
 
 describe('Credential Encryption (AES-256-GCM)', () => {
+  afterEach(() => vi.unstubAllEnvs());
   it('should encrypt plainText with enc:v1: header', () => {
     const plain = 'MinhaSenhaSuperSecreta123!';
     const encrypted = encryptSecret(plain);
@@ -32,9 +33,38 @@ describe('Credential Encryption (AES-256-GCM)', () => {
 
     expect(result).toBe(legacyText);
   });
+
+  it('should refuse the development fallback key in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('CREDENTIAL_ENCRYPTION_KEY', '');
+
+    expect(() => encryptSecret('segredo')).toThrow('CREDENTIAL_ENCRYPTION_KEY');
+  });
 });
 
 describe('Authentication & Password Hashing (bcrypt)', () => {
+  it('stores only a deterministic hash of the session token', () => {
+    const token = 'raw-session-token';
+    const hashed = hashSessionToken(token);
+
+    expect(hashed).not.toBe(token);
+    expect(hashed).toHaveLength(64);
+    expect(hashSessionToken(token)).toBe(hashed);
+  });
+
+  it('locks login after five consecutive failures', () => {
+    const now = new Date('2026-08-29T12:00:00.000Z');
+
+    expect(getFailedLoginState(3, now)).toEqual({
+      failed_login_attempts: 4,
+      locked_until: null,
+    });
+    expect(getFailedLoginState(4, now)).toEqual({
+      failed_login_attempts: 0,
+      locked_until: new Date('2026-08-29T12:15:00.000Z'),
+    });
+  });
+
   it('should generate valid hash and verify correctly', async () => {
     const password = 'UserPassword2026#';
     const hash = await hashPassword(password);

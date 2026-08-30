@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { 
   LayoutDashboard, 
@@ -13,17 +14,24 @@ import {
   Sparkles,
   Landmark,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Settings
 } from 'lucide-react';
 
-export default function SidebarNav() {
+interface SidebarNavProps {
+  userName: string;
+  userRole: string;
+}
+
+export default function SidebarNav({ userName, userRole }: SidebarNavProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('themuno_sidebar_collapsed');
     if (saved === 'true') {
-      setIsCollapsed(true);
+      const frame = requestAnimationFrame(() => setIsCollapsed(true));
+      return () => cancelAnimationFrame(frame);
     }
   }, []);
 
@@ -70,7 +78,13 @@ export default function SidebarNav() {
       icon: ClipboardList,
       badgeBg: 'bg-rose-500/20 text-rose-300',
     },
-  ];
+    {
+      href: '/admin',
+      label: 'Administração',
+      icon: Settings,
+      badgeBg: 'bg-slate-500/20 text-slate-300',
+    },
+  ].filter((item) => item.href !== '/admin' || userRole === 'ADMIN');
 
   return (
     <aside className={`border-r border-[#1e293b] bg-[#090f1e] flex flex-col shrink-0 transition-all duration-300 ease-in-out relative ${
@@ -92,9 +106,11 @@ export default function SidebarNav() {
         <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl -mr-6 -mt-6 group-hover:bg-blue-500/20 transition-all duration-500" />
         <div className={`flex items-center gap-3.5 relative z-10 ${isCollapsed ? 'justify-center' : ''}`}>
           <div className="relative shrink-0">
-            <img
+            <Image
               src="/themuno_logo.png"
               alt="ThemUno Logo"
+              width={56}
+              height={56}
               className={`object-contain rounded-2xl ring-2 ring-blue-500/60 shadow-2xl shadow-blue-500/40 group-hover:scale-105 transition-all duration-300 bg-slate-950 p-1 ${
                 isCollapsed ? 'w-11 h-11' : 'w-14 h-14'
               }`}
@@ -159,9 +175,9 @@ export default function SidebarNav() {
         </div>
         {!isCollapsed && (
           <div className="space-y-0.5 overflow-hidden">
-            <div className="font-bold text-xs text-white truncate">Gestor de Contratos</div>
+            <div className="font-bold text-xs text-white truncate">{userName}</div>
             <div className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Sistema Ativo
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> {userRole}
             </div>
           </div>
         )}

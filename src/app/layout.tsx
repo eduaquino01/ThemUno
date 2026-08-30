@@ -13,6 +13,9 @@ import {
   CreditCard, 
   ClipboardList 
 } from 'lucide-react';
+import { getAuthenticatedUser } from '@/lib/auth';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -29,18 +32,23 @@ export const metadata: Metadata = {
   description: 'IT contract management, governance, risk prevention, and invoice reconciliation dashboard.',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const user = await getAuthenticatedUser();
+  const pathname = (await headers()).get('x-themuno-pathname') || '/';
+  if (!user && pathname !== '/login') redirect('/login');
+
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}>
+    <html lang="pt-BR" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}>
       <body className="h-screen w-screen flex overflow-hidden bg-[#070b13] text-[#f1f5f9] font-sans antialiased">
+        {!user ? children : (
         <ToastProvider>
         <ConfirmProvider>
         {/* SIDEBAR NAVIGATION */}
-        <SidebarNav />
+        <SidebarNav userName={user.name} userRole={user.role} />
 
         {/* MAIN CONTENT AREA */}
         <main className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -56,6 +64,7 @@ export default function RootLayout({
         </main>
         </ConfirmProvider>
         </ToastProvider>
+        )}
       </body>
     </html>
   );

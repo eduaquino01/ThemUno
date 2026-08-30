@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { Building2, Upload, RefreshCw, TrendingUp, TrendingDown, Wallet, Scale, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
+import Link from 'next/link';
+import { Building2, Upload, RefreshCw, TrendingUp, TrendingDown, Wallet, Scale, Search, CheckCircle2, AlertTriangle, HandCoins, ReceiptText, ChartNoAxesCombined, Landmark, Target, GitBranch, TableProperties, LockKeyhole, FileDown, Telescope } from 'lucide-react';
 import { getFinanceDashboard, importFinancialPlan } from './actions';
 import { inferCompanyCode, normalizeWorkbook, hashImportRows, type ImportFormat } from './importers';
 import Pagination from '@/components/ui/Pagination';
@@ -138,6 +139,16 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
             <p className="mt-1 text-sm text-slate-400">Previsto × realizado, categorias, semanas e conciliação em uma única visão.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link href="/finance/cash-flow" className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"><ChartNoAxesCombined className="h-4 w-4" /> Fluxo de caixa</Link>
+            <Link href="/finance/reconciliation" className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-bold text-indigo-300 hover:bg-indigo-500/20"><Landmark className="h-4 w-4" /> Conciliação bancária</Link>
+            <Link href="/finance/budgets" className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/20"><Target className="h-4 w-4" /> Orçamentos</Link>
+            <Link href="/finance/allocations" className="inline-flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-300 hover:bg-violet-500/20"><GitBranch className="h-4 w-4" /> Rateios</Link>
+            <Link href="/finance/dre" className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300"><TableProperties className="h-4 w-4" /> DRE</Link>
+            <Link href="/finance/closing" className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300"><LockKeyhole className="h-4 w-4" /> Fechamento</Link>
+            <Link href="/finance/scenarios" className="inline-flex items-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-300"><Telescope className="h-4 w-4" /> Cenários</Link>
+            <Link href="/finance/executive-reports" className="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-300"><FileDown className="h-4 w-4" /> Relatório executivo</Link>
+            <Link href="/finance/payables" className="inline-flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/20"><ReceiptText className="h-4 w-4" /> Contas a pagar</Link>
+            <Link href="/finance/receivables" className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20"><HandCoins className="h-4 w-4" /> Contas a receber</Link>
             <select value={companyId} onChange={(event) => chooseCompany(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
               <option value="ALL">Todas as empresas</option>
               {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}

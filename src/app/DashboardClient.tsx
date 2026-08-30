@@ -211,6 +211,15 @@ export default function DashboardClient({ initialData }: DashboardClientProps) {
     const secret = await revealCredential(id);
     if (secret !== null) {
       setVisibleSecrets((prev) => ({ ...prev, [id]: true }));
+      // Security auto-hide after 30 seconds
+      setTimeout(() => {
+        setVisibleSecrets((prev) => ({ ...prev, [id]: false }));
+        setRevealedSecrets((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, 30000);
     }
   };
 

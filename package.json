@@ -6,22 +6,32 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint src tests prisma",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "prisma db seed"
+    "db:generate:postgres": "node scripts/generate-postgres-schema.mjs && prisma generate --config prisma.config.postgresql.ts",
+    "db:migrate:postgres": "node scripts/generate-postgres-schema.mjs && prisma migrate deploy --config prisma.config.postgresql.ts",
+    "db:seed": "prisma db seed",
+    "admin:create": "node --env-file=.env --experimental-strip-types scripts/create-admin.ts",
+    "backup:sqlite": "node scripts/backup-sqlite.mjs",
+    "restore:sqlite": "node scripts/restore-sqlite.mjs",
+    "local:start": "sh scripts/local-start.sh",
+    "local:stop": "sh scripts/local-stop.sh",
+    "local:status": "sh scripts/local-status.sh"
   },
   "dependencies": {
     "@emnapi/core": "^1.3.1",
     "@emnapi/runtime": "^1.3.1",
     "@prisma/adapter-better-sqlite3": "^7.9.1",
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.9.1",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^13.0.3",
     "lucide-react": "^1.33.0",
     "next": "16.3.1",
     "pdfmake": "^0.3.11",
+    "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.4.3"
@@ -32,6 +42,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/pdfmake": "^0.3.3",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
@@ -41,6 +52,9 @@
     "tsx": "^4.23.12",
     "typescript": "^5",
     "vitest": "^3.0.8"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

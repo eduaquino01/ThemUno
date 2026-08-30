@@ -1,49 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ThemUno
 
-## Getting Started
+Sistema multiempresa para gestão contratual, administrativa e financeira, desenvolvido com Next.js, React, TypeScript, Prisma e PostgreSQL/SQLite.
 
-### Módulo financeiro
+## Recursos principais
 
-O menu **Financeiro** oferece visão multiempresa do plano financeiro, comparação entre previsto e realizado, detalhamento por categoria/parceiro e importação das abas mensais do Excel. Dados financeiros reais não são mantidos no repositório; carregue a planilha pela tela de importação depois de preparar o banco.
+- Autenticação, perfis de acesso e isolamento por empresa.
+- Contas a pagar e receber, aprovações e conciliação bancária.
+- Centros de custo, orçamentos, rateios, DRE e fechamento mensal.
+- Fluxo de caixa, cenários de projeção e relatórios executivos.
+- Catálogos administrativos, auditoria e cofre de credenciais criptografado.
 
-Para preparar o banco local:
+## Desenvolvimento local
+
+Requisitos: Node.js 22 e npm.
 
 ```bash
+cp .env.example .env
+npm ci
 npx prisma migrate deploy
-npx prisma db seed
+npm run db:seed
+npm run dev
 ```
 
-Transferências entre contas próprias são armazenadas para rastreabilidade, mas neutralizadas nos KPIs econômicos. Antes de uso externo, implemente autenticação e autorização por empresa.
+O ambiente local usa SQLite em `dev.db`. O seed exige `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` e `CREDENTIAL_ENCRYPTION_KEY`; não existem credenciais padrão.
 
-First, run the development server:
+### Uso diário individual
+
+Depois da instalação inicial, use estes três comandos:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run local:start   # cria o backup diário e inicia o sistema
+npm run local:status  # verifica servidor, banco e último backup
+npm run local:stop    # encerra o sistema com segurança
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+O sistema fica disponível em [http://127.0.0.1:3000](http://127.0.0.1:3000). Os logs locais ficam em `.themuno/dev.log` e os 30 backups mais recentes em `backups/`; ambas as pastas são ignoradas pelo Git.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Para criar ou atualizar somente o administrador sem apagar dados:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run admin:create
+```
 
-## Learn More
+## Qualidade
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build -- --webpack
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Produção
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Produção usa PostgreSQL e imagem Docker sem privilégios. Consulte [operação em produção](docs/production.md) e [backup e restauração](docs/backup-restore.md).

@@ -4,7 +4,11 @@ import crypto from 'crypto';
 const DEFAULT_DEV_KEY = 'themuno_secret_credential_encryption_key_32bytes!';
 
 function getEncryptionKey(): Buffer {
-  const envKey = process.env.CREDENTIAL_ENCRYPTION_KEY || DEFAULT_DEV_KEY;
+  const configuredKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
+  if (process.env.NODE_ENV === 'production' && !configuredKey) {
+    throw new Error('CREDENTIAL_ENCRYPTION_KEY é obrigatória em produção.');
+  }
+  const envKey = configuredKey || DEFAULT_DEV_KEY;
   return crypto.createHash('sha256').update(envKey).digest();
 }
 

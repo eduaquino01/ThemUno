@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { getAuthorizedCompanyScope, requireCompanyAccess } from '@/lib/auth';
+import { assertFinancialPeriodsOpen } from '@/lib/financial-period';
 
 const ImportRowSchema = z.object({
   period_start: z.string().min(10),
@@ -31,10 +33,11 @@ const ImportSchema = z.object({
 const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', year = new Date().getFullYear()) {
+  const { companyIds } = await getAuthorizedCompanyScope('view', companyId);
   const start = new Date(`${year}-01-01T00:00:00.000Z`);
   const end = new Date(`${year + 1}-01-01T00:00:00.000Z`);
   const where = {
-    ...(companyId !== 'ALL' ? { company_id: companyId } : {}),
+    ...(companyIds === null ? {} : { company_id: { in: companyIds } }),
     period_start: { gte: start, lt: end },
   };
   const [entries, accounts, imports] = await Promise.all([
@@ -44,10 +47,10 @@ export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', yea
       orderBy: [{ period_start: 'asc' }, { account_name: 'asc' }],
     }),
     prisma.bankAccount.findMany({
-      where: companyId !== 'ALL' ? { company_id: companyId, is_active: true } : { is_active: true },
+      where: { ...(companyIds === null ? {} : { company_id: { in: companyIds } }), is_active: true },
     }),
     prisma.financialImport.findMany({
-      where: companyId !== 'ALL' ? { company_id: companyId } : {},
+      where: companyIds === null ? {} : { company_id: { in: companyIds } },
       orderBy: { created_at: 'desc' },
       take: 8,
     }),
@@ -133,6 +136,8 @@ export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', yea
 
 export async function importFinancialPlan(input: unknown) {
   const data = ImportSchema.parse(input);
+  await requireCompanyAccess(data.company_id, 'import');
+  await assertFinancialPeriodsOpen(data.company_id, data.rows.map((row) => new Date(`${row.period_start}T12:00:00.000Z`)));
   const existing = await prisma.financialImport.findUnique({
     where: { company_id_source_key: { company_id: data.company_id, source_key: data.source_key } },
   });
@@ -195,6 +200,7 @@ export async function importFinancialPlan(input: unknown) {
         amount: row.amount,
         is_internal_transfer: row.is_internal_transfer,
         is_reconciled: row.scenario === 'ACTUAL',
+        settlement_status: row.scenario === 'ACTUAL' ? 'SETTLED' : 'OPEN',
         source: row.source_ref?.startsWith('SANKHYA:') ? 'SANKHYA_EXCEL' : 'EXCEL',
         source_ref: row.source_ref || `${data.source_key}:${index + 1}`,
       })),

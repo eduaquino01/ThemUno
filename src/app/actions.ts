@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
+import { getAuthorizedCompanyScope, requireAuth, requireCompanyAccess, requireGlobalAccess } from '@/lib/auth';
 import { 
   ContractNature,
   ContractType, 
@@ -20,6 +21,7 @@ function serializeCompany(company: any) {
   if (!company) return null;
   return {
     ...company,
+    financial_approval_threshold: Number(company.financial_approval_threshold),
     created_at: company.created_at instanceof Date ? company.created_at.toISOString() : company.created_at,
   };
 }
@@ -128,9 +130,27 @@ const CompanySchema = z.object({
   is_holding: z.boolean().default(false),
 });
 
+async function requireContractAccess(contractId: string, permission: string) {
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { id: true, company_id: true },
+  });
+  if (!contract) throw new Error('Contrato não encontrado.');
+  if (!contract.company_id) {
+    const user = await requireAuth(permission);
+    if (user.role !== 'ADMIN' && user.role !== 'DIRETORIA') {
+      throw new Error('Acesso negado: contrato sem empresa só pode ser tratado por um perfil global.');
+    }
+    return user;
+  }
+  return requireCompanyAccess(contract.company_id, permission);
+}
+
 export async function getCompanies() {
   try {
+    const { companyIds } = await getAuthorizedCompanyScope('view');
     const companies = await prisma.company.findMany({
+      where: companyIds === null ? {} : { id: { in: companyIds } },
       orderBy: { name: 'asc' },
     });
     return companies.map(serializeCompany);
@@ -142,6 +162,8 @@ export async function getCompanies() {
 
 export async function createCompany(data: any) {
   try {
+    const user = await requireAuth('manage_users');
+    if (user.role !== 'ADMIN') throw new Error('Apenas administradores podem cadastrar empresas.');
     const validated = CompanySchema.parse(data);
     const created = await prisma.company.create({
       data: validated,
@@ -156,7 +178,8 @@ export async function createCompany(data: any) {
 
 export async function getContracts(companyId?: string) {
   try {
-    const where = companyId && companyId !== 'ALL' ? { company_id: companyId } : {};
+    const { companyIds } = await getAuthorizedCompanyScope('view', companyId || 'ALL');
+    const where = companyIds === null ? {} : { company_id: { in: companyIds } };
     const contracts = await prisma.contract.findMany({
       where,
       orderBy: { updated_at: 'desc' },
@@ -177,6 +200,7 @@ export async function getContracts(companyId?: string) {
 
 export async function getContractById(id: string) {
   try {
+    await requireContractAccess(id, 'view');
     const contract = await prisma.contract.findUnique({
       where: { id },
       include: {
@@ -197,6 +221,8 @@ export async function getContractById(id: string) {
 
 export async function createContract(data: z.input<typeof ContractSchema>) {
   const validated = ContractSchema.parse(data);
+  if (!validated.company_id) throw new Error('A empresa do contrato é obrigatória.');
+  await requireCompanyAccess(validated.company_id, 'create');
   const contract = await prisma.contract.create({
     data: {
       ...validated,
@@ -217,10 +243,12 @@ export async function createContract(data: z.input<typeof ContractSchema>) {
 }
 
 export async function updateContract(id: string, data: unknown) {
+  await requireContractAccess(id, 'edit');
   // Mesmas regras de createContract, mas com todos os campos opcionais —
   // permite atualizar só um campo (ex.: { status }) sem exigir o objeto
   // inteiro, e sem abrir mão da validação (datas, enums, valores não-negativos).
   const validated = ContractSchema.partial().parse(data);
+  if (validated.company_id) await requireCompanyAccess(validated.company_id, 'edit');
 
   const contract = await prisma.contract.update({
     where: { id },
@@ -241,9 +269,11 @@ export async function updateContract(id: string, data: unknown) {
 }
 
 export async function deleteContract(id: string) {
+  const user = await requireContractAccess(id, 'archive');
   await prisma.contract.delete({
     where: { id }
   });
+  await logAudit({ userId: user.id, module: 'CONTRACTS', entityType: 'Contract', entityId: id, action: 'DELETE' });
   revalidatePath('/contracts');
   revalidatePath('/');
   revalidatePath('/billing');
@@ -267,6 +297,7 @@ const MilestoneSchema = z.object({
 
 export async function createMilestone(data: z.input<typeof MilestoneSchema>) {
   const validated = MilestoneSchema.parse(data);
+  await requireContractAccess(validated.contract_id, 'create');
   const milestone = await prisma.milestone.create({
     data: {
       ...validated,
@@ -278,6 +309,9 @@ export async function createMilestone(data: z.input<typeof MilestoneSchema>) {
 }
 
 export async function updateMilestoneAcceptance(id: string, acceptance_status: AcceptanceStatus) {
+  const current = await prisma.milestone.findUnique({ where: { id }, select: { contract_id: true } });
+  if (!current) throw new Error('Marco não encontrado.');
+  await requireContractAccess(current.contract_id, 'approve');
   const milestone = await prisma.milestone.update({
     where: { id },
     data: { acceptance_status },
@@ -303,6 +337,7 @@ const ChangeRequestSchema = z.object({
 
 export async function createChangeRequest(data: z.infer<typeof ChangeRequestSchema>) {
   const validated = ChangeRequestSchema.parse(data);
+  await requireContractAccess(validated.contract_id, 'create');
   const cr = await prisma.changeRequest.create({
     data: {
       ...validated,
@@ -321,6 +356,7 @@ export async function updateChangeRequestStatus(id: string, status: ChangeReques
   });
 
   if (!currentCr) throw new Error("Change request not found");
+  await requireContractAccess(currentCr.contract_id, 'approve');
 
   let amendmentContractId: string | null = null;
   const financialImpact = Number(currentCr.financial_impact);
@@ -377,7 +413,9 @@ export async function updateChangeRequestStatus(id: string, status: ChangeReques
 
 export async function getChangeRequests() {
   try {
+    const { companyIds } = await getAuthorizedCompanyScope('view');
     const crs = await prisma.changeRequest.findMany({
+      where: companyIds === null ? {} : { contract: { company_id: { in: companyIds } } },
       orderBy: { created_at: 'desc' },
       include: {
         contract: true,
@@ -410,6 +448,7 @@ const RiskSchema = z.object({
 
 export async function createContractRisk(data: z.infer<typeof RiskSchema>) {
   const validated = RiskSchema.parse(data);
+  await requireContractAccess(validated.contract_id, 'create');
   const risk = await prisma.contractRisk.create({
     data: validated,
   });
@@ -434,12 +473,16 @@ const InvoiceSchema = z.object({
 
 export async function createInvoice(data: z.input<typeof InvoiceSchema>) {
   const validated = InvoiceSchema.parse(data);
+  await requireContractAccess(validated.contract_id, 'create');
 
   if (validated.milestone_id) {
     const milestone = await prisma.milestone.findUnique({
       where: { id: validated.milestone_id },
     });
     if (!milestone) throw new Error("Milestone not found");
+    if (milestone.contract_id !== validated.contract_id) {
+      throw new Error('O marco informado não pertence ao contrato selecionado.');
+    }
     if (milestone.acceptance_status !== 'ACCEPTED') {
       throw new Error("Milestone must be formally ACCEPTED before issuing invoice.");
     }
@@ -459,6 +502,9 @@ export async function createInvoice(data: z.input<typeof InvoiceSchema>) {
 }
 
 export async function updateInvoiceStatus(id: string, status: InvoiceStatus, payment_proof_url?: string) {
+  const current = await prisma.invoice.findUnique({ where: { id }, select: { contract_id: true } });
+  if (!current) throw new Error('Fatura não encontrada.');
+  await requireContractAccess(current.contract_id, 'reconcile');
   const invoice = await prisma.invoice.update({
     where: { id },
     data: {
@@ -473,7 +519,9 @@ export async function updateInvoiceStatus(id: string, status: InvoiceStatus, pay
 
 export async function getInvoices() {
   try {
+    const { companyIds } = await getAuthorizedCompanyScope('view');
     const invoices = await prisma.invoice.findMany({
+      where: companyIds === null ? {} : { contract: { company_id: { in: companyIds } } },
       orderBy: { issue_date: 'desc' },
       include: {
         contract: true,
@@ -504,7 +552,9 @@ const MonthlyReportSchema = z.object({
 
 export async function getMonthlyReports() {
   try {
+    const { companyIds } = await getAuthorizedCompanyScope('view');
     const reports = await prisma.monthlyReport.findMany({
+      where: companyIds === null ? {} : { company_id: { in: companyIds } },
       orderBy: { period_month_year: 'desc' },
     });
     return reports.map(serializeReport);
@@ -515,6 +565,7 @@ export async function getMonthlyReports() {
 }
 
 export async function createMonthlyReport(data: z.infer<typeof MonthlyReportSchema>) {
+  await requireGlobalAccess('create');
   const validated = MonthlyReportSchema.parse(data);
   
   const report = await prisma.monthlyReport.create({
@@ -535,6 +586,7 @@ const MonthlyReportUpdateSchema = MonthlyReportSchema.partial().extend({
 });
 
 export async function updateMonthlyReport(id: string, data: unknown) {
+  await requireGlobalAccess('edit');
   const validated = MonthlyReportUpdateSchema.parse(data);
   const report = await prisma.monthlyReport.update({
     where: { id },
@@ -578,6 +630,9 @@ import { logAudit } from '@/lib/audit';
 
 export async function createContractCredential(data: z.input<typeof CredentialSchema>) {
   const validated = CredentialSchema.parse(data);
+  const user = validated.contract_id
+    ? await requireContractAccess(validated.contract_id, 'edit')
+    : await requireGlobalAccess('edit');
   const encryptedSecret = encryptSecret(validated.secret_value);
   const credential = await prisma.contractCredential.create({
     data: {
@@ -587,6 +642,7 @@ export async function createContractCredential(data: z.input<typeof CredentialSc
   });
   
   await logAudit({
+    userId: user.id,
     module: 'VAULT',
     entityType: 'ContractCredential',
     entityId: credential.id,
@@ -599,6 +655,11 @@ export async function createContractCredential(data: z.input<typeof CredentialSc
 }
 
 export async function deleteContractCredential(id: string) {
+  const existing = await prisma.contractCredential.findUnique({ where: { id }, select: { contract_id: true } });
+  if (!existing) throw new Error('Credencial não encontrada.');
+  const user = existing.contract_id
+    ? await requireContractAccess(existing.contract_id, 'edit')
+    : await requireGlobalAccess('edit');
   const cred = await prisma.contractCredential.delete({
     where: { id },
   });
@@ -606,11 +667,13 @@ export async function deleteContractCredential(id: string) {
     revalidatePath(`/contracts/${cred.contract_id}`);
   }
   revalidatePath('/');
+  await logAudit({ userId: user.id, module: 'VAULT', entityType: 'ContractCredential', entityId: id, action: 'DELETE' });
   return { success: true };
 }
 
 export async function getStandaloneCredentials() {
   try {
+    await requireGlobalAccess('view');
     const creds = await prisma.contractCredential.findMany({
       where: { contract_id: null },
       orderBy: { created_at: 'desc' },
@@ -633,8 +696,12 @@ export async function getCredentialSecret(id: string): Promise<string> {
   if (!credential) {
     throw new Error('Credencial não encontrada.');
   }
+  const user = credential.contract_id
+    ? await requireContractAccess(credential.contract_id, 'reveal_credential')
+    : await requireGlobalAccess('reveal_credential');
 
   await logAudit({
+    userId: user.id,
     module: 'VAULT',
     entityType: 'ContractCredential',
     entityId: credential.id,
@@ -680,4 +747,3 @@ export async function getDashboardData() {
     };
   }
 }
-

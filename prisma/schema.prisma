@@ -105,6 +105,12 @@ enum UserRole {
   CONSULTA
 }
 
+enum PartnerType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
 model User {
   id              String        @id @default(uuid())
   name            String
@@ -113,6 +119,8 @@ model User {
   role            UserRole      @default(CONSULTA)
   is_active       Boolean       @default(true)
   last_login_at   DateTime?
+  failed_login_attempts Int          @default(0)
+  locked_until    DateTime?
   created_at      DateTime      @default(now())
   updated_at      DateTime      @updatedAt
 
@@ -136,8 +144,9 @@ model Session {
   id           String   @id @default(uuid())
   user_id      String
   user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  token        String   @unique
+  token_hash   String   @unique @map("token")
   expires_at   DateTime
+  last_seen_at DateTime @default(now())
   created_at   DateTime @default(now())
 }
 
@@ -167,6 +176,7 @@ model Company {
   tax_id               String?
   color                String              @default("#3b82f6")
   is_holding           Boolean             @default(false)
+  financial_approval_threshold Decimal      @default(10000)
   created_at           DateTime            @default(now())
   contracts            Contract[]
   bank_accounts        BankAccount[]
@@ -176,6 +186,69 @@ model Company {
   monthly_reports      MonthlyReport[]
   user_companies       UserCompany[]
   audit_logs           AuditLog[]
+  cost_centers         CostCenter[]
+  partners             Partner[]
+  bank_statement_imports BankStatementImport[]
+  bank_transactions    BankTransaction[]
+  cost_center_budgets  CostCenterBudget[]
+  allocation_rules     AllocationRule[]
+  financial_allocations FinancialAllocation[]
+  financial_period_closes FinancialPeriodClose[]
+  projection_scenarios FinancialProjectionScenario[]
+}
+
+model FinancialProjectionScenario {
+  id                 String   @id @default(uuid())
+  company_id         String
+  company            Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  name               String
+  year               Int
+  revenue_adjustment Decimal  @default(0)
+  expense_adjustment Decimal  @default(0)
+  notes              String?
+  created_by_id      String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@unique([company_id, name, year])
+  @@index([company_id, year])
+}
+
+model CostCenter {
+  id          String   @id @default(uuid())
+  company_id  String
+  company     Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  code        String
+  name        String
+  description String?
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  entries     FinancialEntry[]
+  budgets     CostCenterBudget[]
+  allocation_rule_items AllocationRuleItem[]
+  financial_allocations FinancialAllocation[]
+
+  @@unique([company_id, code])
+  @@index([company_id, is_active])
+}
+
+model Partner {
+  id          String      @id @default(uuid())
+  company_id  String
+  company     Company     @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  type        PartnerType @default(SUPPLIER)
+  name        String
+  tax_id      String?
+  email       String?
+  phone       String?
+  is_active   Boolean     @default(true)
+  created_at  DateTime    @default(now())
+  updated_at  DateTime    @updatedAt
+  entries     FinancialEntry[]
+
+  @@unique([company_id, tax_id])
+  @@index([company_id, type, is_active])
 }
 
 model BankAccount {
@@ -190,6 +263,8 @@ model BankAccount {
   created_at      DateTime         @default(now())
   updated_at      DateTime         @updatedAt
   entries         FinancialEntry[]
+  statement_imports BankStatementImport[]
+  transactions    BankTransaction[]
 
   @@index([company_id])
 }
@@ -202,12 +277,52 @@ model FinancialCategory {
   nature      FinancialNature
   sort_order  Int              @default(0)
   is_active   Boolean          @default(true)
+  dre_group   String           @default("OPERATING_EXPENSE")
   created_at  DateTime         @default(now())
   updated_at  DateTime         @updatedAt
   entries     FinancialEntry[]
+  budgets     CostCenterBudget[]
+  allocation_rules AllocationRule[]
 
   @@unique([company_id, nature, name])
   @@index([company_id, nature])
+}
+
+model FinancialPeriodClose {
+  id           String   @id @default(uuid())
+  company_id   String
+  company      Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  year         Int
+  month        Int
+  status       String   @default("CLOSED")
+  notes        String?
+  closed_by_id String?
+  closed_at    DateTime @default(now())
+  reopened_by_id String?
+  reopened_at  DateTime?
+
+  @@unique([company_id, year, month])
+  @@index([company_id, status, year, month])
+}
+
+model CostCenterBudget {
+  id             String            @id @default(uuid())
+  company_id     String
+  company        Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  cost_center_id String
+  cost_center    CostCenter        @relation(fields: [cost_center_id], references: [id], onDelete: Cascade)
+  category_id    String
+  category       FinancialCategory @relation(fields: [category_id], references: [id], onDelete: Restrict)
+  year           Int
+  month          Int
+  planned_amount Decimal
+  created_by_id  String?
+  created_at     DateTime          @default(now())
+  updated_at     DateTime          @updatedAt
+
+  @@unique([company_id, cost_center_id, category_id, year, month])
+  @@index([company_id, year, month])
+  @@index([cost_center_id, year])
 }
 
 model FinancialImport {
@@ -236,6 +351,10 @@ model FinancialEntry {
   category             FinancialCategory @relation(fields: [category_id], references: [id], onDelete: Restrict)
   bank_account_id      String?
   bank_account         BankAccount?      @relation(fields: [bank_account_id], references: [id], onDelete: SetNull)
+  cost_center_id       String?
+  cost_center          CostCenter?       @relation(fields: [cost_center_id], references: [id], onDelete: SetNull)
+  partner_id           String?
+  partner              Partner?          @relation(fields: [partner_id], references: [id], onDelete: SetNull)
   import_id            String?
   import_batch         FinancialImport?  @relation(fields: [import_id], references: [id], onDelete: SetNull)
   scenario             FinancialScenario
@@ -245,6 +364,12 @@ model FinancialEntry {
   document_number      String?
   sankhya_nufin        String?           // Sankhya Unique Financial Identifier
   settlement_status    String            @default("OPEN") // OPEN, SETTLED, CANCELLED, DISPUTED
+  approval_status      String            @default("NOT_REQUIRED") // NOT_REQUIRED, PENDING, APPROVED, REJECTED
+  approval_required    Boolean           @default(false)
+  created_by_id        String?
+  reviewed_by_id       String?
+  reviewed_at          DateTime?
+  rejection_reason     String?
   reconciliation_status String           @default("UNRECONCILED") // UNRECONCILED, RECONCILED, MANUAL
   period_start         DateTime
   period_end           DateTime
@@ -259,11 +384,110 @@ model FinancialEntry {
   deleted_by           String?
   created_at           DateTime          @default(now())
   updated_at           DateTime          @updatedAt
+  bank_transactions    BankTransaction[]
+  allocations          FinancialAllocation[]
 
   @@unique([company_id, sankhya_nufin])
   @@index([company_id, period_start, scenario])
   @@index([company_id, nature, category_id])
   @@index([import_id])
+  @@index([company_id, settlement_status, due_date])
+  @@index([company_id, approval_status, due_date])
+  @@index([cost_center_id])
+  @@index([partner_id])
+}
+
+model AllocationRule {
+  id               String              @id @default(uuid())
+  company_id       String
+  company          Company             @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  name             String
+  category_id      String?
+  category         FinancialCategory?  @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  account_contains String?
+  is_active        Boolean             @default(true)
+  created_by_id    String?
+  created_at       DateTime            @default(now())
+  updated_at       DateTime            @updatedAt
+  items            AllocationRuleItem[]
+  allocations      FinancialAllocation[]
+
+  @@index([company_id, is_active])
+}
+
+model AllocationRuleItem {
+  id             String         @id @default(uuid())
+  rule_id        String
+  rule           AllocationRule @relation(fields: [rule_id], references: [id], onDelete: Cascade)
+  cost_center_id String
+  cost_center    CostCenter     @relation(fields: [cost_center_id], references: [id], onDelete: Restrict)
+  percentage     Decimal
+  created_at     DateTime       @default(now())
+
+  @@unique([rule_id, cost_center_id])
+  @@index([cost_center_id])
+}
+
+model FinancialAllocation {
+  id               String          @id @default(uuid())
+  company_id       String
+  company          Company         @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  financial_entry_id String
+  financial_entry  FinancialEntry  @relation(fields: [financial_entry_id], references: [id], onDelete: Cascade)
+  cost_center_id   String
+  cost_center      CostCenter      @relation(fields: [cost_center_id], references: [id], onDelete: Restrict)
+  rule_id          String?
+  rule             AllocationRule? @relation(fields: [rule_id], references: [id], onDelete: SetNull)
+  percentage       Decimal
+  allocated_amount Decimal
+  created_at       DateTime        @default(now())
+
+  @@unique([financial_entry_id, cost_center_id])
+  @@index([company_id, cost_center_id])
+  @@index([rule_id])
+}
+
+model BankStatementImport {
+  id             String            @id @default(uuid())
+  company_id     String
+  company        Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  bank_account_id String
+  bank_account   BankAccount       @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  file_name      String
+  source_hash    String
+  imported_rows  Int               @default(0)
+  ignored_rows   Int               @default(0)
+  created_by_id  String?
+  created_at     DateTime          @default(now())
+  transactions   BankTransaction[]
+
+  @@unique([bank_account_id, source_hash])
+  @@index([company_id, created_at])
+}
+
+model BankTransaction {
+  id                 String               @id @default(uuid())
+  company_id         String
+  company            Company              @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  bank_account_id    String
+  bank_account       BankAccount           @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  statement_import_id String
+  statement_import   BankStatementImport   @relation(fields: [statement_import_id], references: [id], onDelete: Cascade)
+  financial_entry_id String?
+  financial_entry    FinancialEntry?       @relation(fields: [financial_entry_id], references: [id], onDelete: SetNull)
+  transaction_date   DateTime
+  description        String
+  document_number    String?
+  amount             Decimal
+  fingerprint        String
+  match_status       String                @default("UNMATCHED") // UNMATCHED, MATCHED
+  matched_by_id      String?
+  matched_at         DateTime?
+  created_at         DateTime              @default(now())
+
+  @@unique([bank_account_id, fingerprint])
+  @@index([company_id, match_status, transaction_date])
+  @@index([financial_entry_id])
 }
 
 model Contract {

@@ -13,9 +13,11 @@ import {
   X, 
   ArrowUpRight,
   CheckCircle2,
-  Lock
+  Lock,
+  LogOut
 } from 'lucide-react';
 import { getContracts, getInvoices } from '@/app/actions';
+import { logout } from '@/app/auth/actions';
 
 import CompanySelector from '@/components/CompanySelector';
 
@@ -252,6 +254,17 @@ export default function GlobalHeader() {
             </div>
           )}
         </div>
+
+        <form action={logout}>
+          <button
+            type="submit"
+            className="p-2 text-gray-400 hover:text-white bg-slate-950 border border-[#1e293b] hover:border-slate-700 rounded-xl transition-all"
+            title="Sair com segurança"
+            aria-label="Sair"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </form>
       </div>
 
       {/* ======================================================== */}

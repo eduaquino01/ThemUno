@@ -1,5 +1,6 @@
 import pkg from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import bcrypt from 'bcryptjs';
 
 const { PrismaClient } = pkg;
 
@@ -10,6 +11,10 @@ const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log('Clearing database...');
+  await prisma.auditLog.deleteMany({});
+  await prisma.session.deleteMany({});
+  await prisma.userCompany.deleteMany({});
+  await prisma.user.deleteMany({});
   await prisma.contractCredential.deleteMany({});
   await prisma.invoice.deleteMany({});
   await prisma.contractRisk.deleteMany({});
@@ -71,6 +76,26 @@ async function main() {
       is_holding: false,
     },
   });
+
+  const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminEmail || !adminPassword || adminPassword.length < 12) {
+    throw new Error('Defina SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD com pelo menos 12 caracteres antes de executar o seed.');
+  }
+  const admin = await prisma.user.create({
+    data: {
+      name: process.env.SEED_ADMIN_NAME?.trim() || 'Administrador ThemUno',
+      email: adminEmail,
+      password_hash: await bcrypt.hash(adminPassword, 12),
+      role: 'ADMIN',
+      user_companies: {
+        create: [companySmarttsRJ, companySmarttsSPE, companyIntegra, companyAba, companyInfometter].map((company) => ({
+          company_id: company.id,
+        })),
+      },
+    },
+  });
+  console.log(`Administrator created: ${admin.email}`);
 
   // 1. SMARTTS UTILITIES RJ SPE LTDA - Contrato Operacional RJ
   const smarttsRJContract = await prisma.contract.create({

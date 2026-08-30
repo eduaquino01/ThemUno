@@ -66,6 +66,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
   const [selectedNature, setSelectedNature] = useState<string>('ALL');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
+  const [companiesList, setCompaniesList] = useState<any[]>([]);
   const CONTRACTS_PAGE_SIZE = 50;
   const [contractsPage, setContractsPage] = useState(1);
 
@@ -109,7 +110,6 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
   // Modal form state for CREATE
   const [showModal, setShowModal] = useState(false);
   const [formError, setFormError] = useState('');
-  const [companiesList, setCompaniesList] = useState<any[]>([]);
   const [formData, setFormData] = useState({
     company_id: '',
     title: '',
