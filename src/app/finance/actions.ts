@@ -114,6 +114,7 @@ export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', yea
     entries: entries.map((entry) => ({
       id: entry.id,
       company: entry.company.name,
+      company_id: entry.company_id,
       period_start: entry.period_start.toISOString(),
       period_end: entry.period_end.toISOString(),
       scenario: entry.scenario,
@@ -123,6 +124,13 @@ export async function getFinanceDashboard(companyId: string | 'ALL' = 'ALL', yea
       amount: Number(entry.amount),
       is_internal_transfer: entry.is_internal_transfer,
       is_reconciled: entry.is_reconciled,
+      bank_account_id: entry.bank_account_id,
+    })),
+    bankAccounts: accounts.map((account) => ({
+      id: account.id,
+      company_id: account.company_id,
+      bank_name: account.bank_name,
+      account_number: account.account_number,
     })),
     imports: imports.map((item) => ({
       ...item,

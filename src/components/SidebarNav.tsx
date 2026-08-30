@@ -12,6 +12,7 @@ import {
   UserCheck,
   Sparkles,
   Landmark,
+  SlidersHorizontal,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -69,6 +70,12 @@ export default function SidebarNav() {
       label: 'Relatórios Mensais',
       icon: ClipboardList,
       badgeBg: 'bg-rose-500/20 text-rose-300',
+    },
+    {
+      href: '/admin',
+      label: 'Administração',
+      icon: SlidersHorizontal,
+      badgeBg: 'bg-slate-500/20 text-slate-300',
     },
   ];
 

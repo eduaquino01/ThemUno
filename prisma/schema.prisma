@@ -104,7 +104,9 @@ model Company {
   tax_id      String?
   color       String     @default("#3b82f6")
   is_holding  Boolean    @default(false)
+  is_active   Boolean    @default(true)
   created_at  DateTime   @default(now())
+  updated_at  DateTime   @updatedAt
   contracts   Contract[]
   bank_accounts BankAccount[]
   financial_categories FinancialCategory[]
