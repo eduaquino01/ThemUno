@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
-import { 
+import { CompanySchema, ContractUpdateSchema } from '@/lib/schemas';
+import {
   ContractNature,
   ContractType, 
   ContractStatus, 
@@ -21,6 +22,7 @@ function serializeCompany(company: any) {
   return {
     ...company,
     created_at: company.created_at instanceof Date ? company.created_at.toISOString() : company.created_at,
+    updated_at: company.updated_at instanceof Date ? company.updated_at.toISOString() : company.updated_at,
   };
 }
 
@@ -120,17 +122,11 @@ const ContractSchema = z.object({
   raw_text_or_url: z.string().optional().nullable(),
 });
 
-const CompanySchema = z.object({
-  name: z.string().min(2, "Nome da empresa é obrigatório"),
-  code: z.string().min(2, "Código é obrigatório"),
-  tax_id: z.string().optional().nullable(),
-  color: z.string().default("#3b82f6"),
-  is_holding: z.boolean().default(false),
-});
 
 export async function getCompanies() {
   try {
     const companies = await prisma.company.findMany({
+      where: { is_active: true },
       orderBy: { name: 'asc' },
     });
     return companies.map(serializeCompany);
@@ -217,10 +213,11 @@ export async function createContract(data: z.input<typeof ContractSchema>) {
 }
 
 export async function updateContract(id: string, data: unknown) {
-  // Mesmas regras de createContract, mas com todos os campos opcionais —
-  // permite atualizar só um campo (ex.: { status }) sem exigir o objeto
-  // inteiro, e sem abrir mão da validação (datas, enums, valores não-negativos).
-  const validated = ContractSchema.partial().parse(data);
+  // Todos os campos opcionais e sem os `.default()` de ContractSchema — permite
+  // atualizar só um campo (ex.: { status }) sem que os defaults do schema de
+  // criação (nature→EXPENSE, auto_renewal→false, notice_period→30) sejam
+  // reinjetados e gravados por cima dos valores reais a cada troca de status.
+  const validated = ContractUpdateSchema.parse(data);
 
   const contract = await prisma.contract.update({
     where: { id },

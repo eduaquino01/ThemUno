@@ -3,8 +3,10 @@
 import { useMemo, useState, useTransition } from 'react';
 import { Building2, Upload, RefreshCw, TrendingUp, TrendingDown, Wallet, Scale, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { getFinanceDashboard, importFinancialPlan } from './actions';
+import { setEntryBankAccount } from '@/app/admin/actions';
 import { inferCompanyCode, normalizeWorkbook, hashImportRows, type ImportFormat } from './importers';
 import Pagination from '@/components/ui/Pagination';
+import { useToast } from '@/components/ui/ToastProvider';
 
 const ENTRIES_PAGE_SIZE = 100;
 
@@ -54,9 +56,24 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
   const [entriesPage, setEntriesPage] = useState(1);
   const [isPending, startTransition] = useTransition();
   const [importState, setImportState] = useState<{ file?: File; rows: any[]; format?: ImportFormat; warnings?: string[]; error?: string; success?: string }>({ rows: [] });
+  const toast = useToast();
 
   const reload = (nextCompanyId = companyId, nextYear = year) => startTransition(async () => {
     setData(await getFinanceDashboard(nextCompanyId, nextYear));
+  });
+
+  // Vincula (ou desvincula) um lançamento a uma conta bancária da mesma
+  // empresa. Atualiza a linha localmente e recarrega para manter os totais.
+  const linkAccount = (entryId: string, bankAccountId: string | null) => startTransition(async () => {
+    try {
+      await setEntryBankAccount(entryId, bankAccountId);
+      setData((prev) => ({
+        ...prev,
+        entries: prev.entries.map((entry) => (entry.id === entryId ? { ...entry, bank_account_id: bankAccountId } : entry)),
+      }));
+    } catch (error: any) {
+      toast.error(error?.message || 'Erro ao vincular a conta.');
+    }
   });
   const chooseCompany = (value: string) => {
     setCompanyId(value);
@@ -193,7 +210,7 @@ export default function FinanceClient({ companies, initialCompanyId, initialData
 
       {view === 'entries' && <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
         <div className="flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" /><input value={query} onChange={(event) => { setQuery(event.target.value); setEntriesPage(1); }} placeholder="Buscar parceiro, categoria ou empresa" className="w-full rounded-xl border border-slate-700 bg-slate-950 py-2 pl-9 pr-3 text-xs outline-none focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" /></div><select value={monthFilter} onChange={(event) => { setMonthFilter(Number(event.target.value)); setEntriesPage(1); }} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"><option value={0}>Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></div>
-        <div className="max-h-[620px] overflow-auto"><table className="w-full min-w-[950px] text-xs"><thead className="sticky top-0 bg-slate-950 text-slate-400"><tr>{['Período','Empresa','Categoria','Parceiro / Conta','Cenário','Natureza','Valor','Conciliação'].map((title) => <th key={title} className="px-3 py-3 text-left last:text-center">{title}</th>)}</tr></thead><tbody>{pagedEntries.map((entry) => <tr key={entry.id} className="border-t border-slate-800/70"><td className="whitespace-nowrap px-3 py-2">{new Date(entry.period_start).toLocaleDateString('pt-BR')}–{new Date(entry.period_end).toLocaleDateString('pt-BR')}</td><td className="px-3 py-2">{entry.company}</td><td className="px-3 py-2">{entry.category}</td><td className="px-3 py-2 font-semibold text-white">{entry.account}</td><td className="px-3 py-2">{entry.scenario === 'ACTUAL' ? 'Real' : 'Previsto'}</td><td className={entry.nature === 'REVENUE' ? 'px-3 py-2 text-emerald-400' : 'px-3 py-2 text-rose-400'}>{entry.nature === 'REVENUE' ? 'Receita' : 'Despesa'}</td><td className="px-3 py-2 text-right font-bold">{money.format(entry.amount)}</td><td className="px-3 py-2 text-center">{entry.is_reconciled ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-400" /> : '—'}</td></tr>)}</tbody></table></div>
+        <div className="max-h-[620px] overflow-auto"><table className="w-full min-w-[1050px] text-xs"><thead className="sticky top-0 bg-slate-950 text-slate-400"><tr>{['Período','Empresa','Categoria','Parceiro / Conta','Cenário','Natureza','Valor','Conta bancária','Conciliação'].map((title) => <th key={title} className="px-3 py-3 text-left last:text-center">{title}</th>)}</tr></thead><tbody>{pagedEntries.map((entry) => { const accountOptions = data.bankAccounts.filter((account) => account.company_id === entry.company_id); return <tr key={entry.id} className="border-t border-slate-800/70"><td className="whitespace-nowrap px-3 py-2">{new Date(entry.period_start).toLocaleDateString('pt-BR')}–{new Date(entry.period_end).toLocaleDateString('pt-BR')}</td><td className="px-3 py-2">{entry.company}</td><td className="px-3 py-2">{entry.category}</td><td className="px-3 py-2 font-semibold text-white">{entry.account}</td><td className="px-3 py-2">{entry.scenario === 'ACTUAL' ? 'Real' : 'Previsto'}</td><td className={entry.nature === 'REVENUE' ? 'px-3 py-2 text-emerald-400' : 'px-3 py-2 text-rose-400'}>{entry.nature === 'REVENUE' ? 'Receita' : 'Despesa'}</td><td className="px-3 py-2 text-right font-bold">{money.format(entry.amount)}</td><td className="px-3 py-2"><select value={entry.bank_account_id ?? ''} disabled={isPending || accountOptions.length === 0} onChange={(event) => linkAccount(entry.id, event.target.value || null)} className="w-full max-w-[160px] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-40"><option value="">{accountOptions.length ? '—' : 'Sem contas'}</option>{accountOptions.map((account) => <option key={account.id} value={account.id}>{account.bank_name}{account.account_number ? ` · ${account.account_number}` : ''}</option>)}</select></td><td className="px-3 py-2 text-center">{entry.is_reconciled ? <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-400" /> : '—'}</td></tr>; })}</tbody></table></div>
         <Pagination page={entriesPage} pageSize={ENTRIES_PAGE_SIZE} totalItems={filteredEntries.length} onPageChange={setEntriesPage} />
       </section>}
 

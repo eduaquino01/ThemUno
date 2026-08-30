@@ -1,11 +1,11 @@
-import { getContracts, createContract } from '@/app/actions';
+import { getContracts, getCompanies } from '@/app/actions';
 import ContractsClient from './ContractsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ContractsPage() {
-  const contracts = await getContracts();
-  
+  const [contracts, companies] = await Promise.all([getContracts(), getCompanies()]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -13,7 +13,7 @@ export default async function ContractsPage() {
         <p className="text-gray-400 text-sm mt-1">Visão integrada do ciclo de vida dos contratos e aditivos.</p>
       </div>
 
-      <ContractsClient initialContracts={contracts} />
+      <ContractsClient initialContracts={contracts} initialCompanies={companies} />
     </div>
   );
 }

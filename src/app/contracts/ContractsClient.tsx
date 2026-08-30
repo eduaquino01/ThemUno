@@ -3,9 +3,10 @@
 import { useState, useEffect, useTransition, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createContract, updateContract, deleteContract, getCompanies } from '@/app/actions';
+import { createContract, updateContract, deleteContract } from '@/app/actions';
 import { formatCurrency, parseNumber, formatDate } from '@/lib/formatters';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useTableList } from '@/lib/useTableList';
 import EmptyState from '@/components/ui/EmptyState';
 import Pagination from '@/components/ui/Pagination';
 export type ContractType = 'MSA' | 'SOW' | 'SLA' | 'NDA' | 'SAAS' | 'HARDWARE' | 'PARTNERSHIP' | 'AMENDMENT';
@@ -46,55 +47,68 @@ import {
   List,
   CheckCircle2,
   Clock,
-  ArrowRight
+  ArrowRight,
+  ArrowUpDown
 } from 'lucide-react';
 
 interface ContractsClientProps {
   initialContracts: any[];
+  initialCompanies: any[];
 }
 
-export default function ContractsClient({ initialContracts }: ContractsClientProps) {
+export default function ContractsClient({ initialContracts, initialCompanies }: ContractsClientProps) {
   const router = useRouter();
   const toast = useToast();
   const [contracts, setContracts] = useState(initialContracts);
   const [isPending, startTransition] = useTransition();
 
-  // Search & Filter state
-  const [search, setSearch] = useState('');
-  const [selectedType, setSelectedType] = useState<string>('ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
-  const [selectedNature, setSelectedNature] = useState<string>('ALL');
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const CONTRACTS_PAGE_SIZE = 50;
-  const [contractsPage, setContractsPage] = useState(1);
 
+  // Busca livre + filtros (empresa/tipo/status/natureza) + ordenação por
+  // coluna + paginação da tabela, tudo pelo hook compartilhado useTableList.
+  const listConfig = useMemo(
+    () => ({
+      pageSize: CONTRACTS_PAGE_SIZE,
+      searchText: (c: any) =>
+        `${c.title ?? ''} ${c.counterpart ?? ''} ${c.company?.name ?? ''}`,
+      filters: {
+        company: (c: any) => c.company_id ?? 'NONE',
+        type: (c: any) => c.type,
+        status: (c: any) => c.status,
+        nature: (c: any) => c.nature,
+      },
+      sorters: {
+        title: (a: any, b: any) => String(a.title).localeCompare(String(b.title), 'pt-BR'),
+        counterpart: (a: any, b: any) =>
+          String(a.counterpart).localeCompare(String(b.counterpart), 'pt-BR'),
+        end_date: (a: any, b: any) =>
+          new Date(a.end_date).getTime() - new Date(b.end_date).getTime(),
+        total_value: (a: any, b: any) => Number(a.total_value) - Number(b.total_value),
+      },
+    }),
+    [],
+  );
+  const list = useTableList(contracts, listConfig);
+
+  // Sincroniza o filtro de empresa com o seletor global do cabeçalho
+  // (evento + localStorage), preservando o comportamento anterior da tela.
+  // A lista de empresas vem pronta do servidor (initialCompanies).
   useEffect(() => {
-    async function loadCompanies() {
-      const comps = await getCompanies();
-      const loaded = comps || [];
-      setCompaniesList(loaded);
-
-      const saved = localStorage.getItem('themuno_selected_company_id');
-      if (saved && saved !== 'ALL') {
-        const exists = loaded.some((c: any) => c.id === saved);
-        if (exists) {
-          setSelectedCompanyId(saved);
-        } else {
-          setSelectedCompanyId('ALL');
-          localStorage.setItem('themuno_selected_company_id', 'ALL');
-        }
-      }
+    const saved = localStorage.getItem('themuno_selected_company_id');
+    if (saved && saved !== 'ALL' && initialCompanies.some((c: any) => c.id === saved)) {
+      list.setFilter('company', saved);
     }
-    loadCompanies();
 
     const handleCompanyChange = (e: any) => {
-      setSelectedCompanyId(e.detail || 'ALL');
-      setContractsPage(1);
+      list.setFilter('company', e.detail || 'ALL');
     };
     window.addEventListener('themuno_company_changed', handleCompanyChange);
     return () => window.removeEventListener('themuno_company_changed', handleCompanyChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectedCompanyId = list.filterValues.company ?? 'ALL';
 
   const handleStatusChange = async (id: string, status: ContractStatus) => {
     try {
@@ -109,7 +123,7 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
   // Modal form state for CREATE
   const [showModal, setShowModal] = useState(false);
   const [formError, setFormError] = useState('');
-  const [companiesList, setCompaniesList] = useState<any[]>([]);
+  const companiesList = initialCompanies;
   const [formData, setFormData] = useState({
     company_id: '',
     title: '',
@@ -149,34 +163,13 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
     setContracts(initialContracts);
   }, [initialContracts]);
 
-  // Filter logic
-  const filteredContracts = useMemo(() => contracts.filter((c) => {
-    const matchesCompany = selectedCompanyId === 'ALL' || c.company_id === selectedCompanyId;
-    const matchesSearch =
-      c.title.toLowerCase().includes(search.toLowerCase()) ||
-      c.counterpart.toLowerCase().includes(search.toLowerCase());
-    const matchesType = selectedType === 'ALL' || c.type === selectedType;
-    const matchesStatus = selectedStatus === 'ALL' || c.status === selectedStatus;
-    const matchesNature = selectedNature === 'ALL' || c.nature === selectedNature;
+  // A visão Kanban mostra todos os cartões de cada coluna (o agrupamento por
+  // status já limita o tamanho); a tabela usa a fatia paginada.
+  const filteredContracts = list.filtered;
+  const pagedContracts = list.paged;
 
-    return matchesCompany && matchesSearch && matchesType && matchesStatus && matchesNature;
-  }), [contracts, selectedCompanyId, search, selectedType, selectedStatus, selectedNature]);
-
-  // Sempre que os filtros mudarem, volta para a primeira página — evita ficar
-  // "preso" numa página que deixou de existir depois de filtrar a lista.
-  useEffect(() => {
-    setContractsPage(1);
-  }, [selectedCompanyId, search, selectedType, selectedStatus, selectedNature]);
-
-  // Fatia da lista filtrada exibida na página atual da tabela (a visão em
-  // Kanban continua mostrando todos os cartões de cada coluna, já que ali a
-  // organização por status já limita naturalmente o tamanho de cada lista).
-  const pagedContracts = useMemo(() => {
-    const totalPages = Math.max(1, Math.ceil(filteredContracts.length / CONTRACTS_PAGE_SIZE));
-    const safePage = Math.min(contractsPage, totalPages);
-    const start = (safePage - 1) * CONTRACTS_PAGE_SIZE;
-    return filteredContracts.slice(start, start + CONTRACTS_PAGE_SIZE);
-  }, [filteredContracts, contractsPage]);
+  const sortIndicator = (key: string) =>
+    list.sortKey === key ? (list.sortDir === 'asc' ? '▲' : '▼') : '';
 
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -304,11 +297,11 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
         {/* Search */}
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-          <input 
-            type="text" 
-            placeholder="Buscar por título ou contraparte..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+          <input
+            type="text"
+            placeholder="Buscar por título, contraparte ou empresa..."
+            value={list.search}
+            onChange={(e) => list.setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 text-sm bg-slate-950 border border-[#1e293b] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
           />
         </div>
@@ -320,10 +313,33 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
             Filtrar:
           </div>
 
+          {/* Company Filter */}
+          <select
+            value={selectedCompanyId}
+            onChange={(e) => list.setFilter('company', e.target.value)}
+            className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+          >
+            <option value="ALL">Todas as Empresas</option>
+            {companiesList.map((company) => (
+              <option key={company.id} value={company.id}>{company.name}</option>
+            ))}
+          </select>
+
+          {/* Nature Filter */}
+          <select
+            value={list.filterValues.nature ?? 'ALL'}
+            onChange={(e) => list.setFilter('nature', e.target.value)}
+            className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+          >
+            <option value="ALL">Receita e Despesa</option>
+            <option value="REVENUE">Receita</option>
+            <option value="EXPENSE">Despesa</option>
+          </select>
+
           {/* Type Filter */}
-          <select 
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
+          <select
+            value={list.filterValues.type ?? 'ALL'}
+            onChange={(e) => list.setFilter('type', e.target.value)}
             className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
           >
             <option value="ALL">Todos os Tipos</option>
@@ -333,9 +349,9 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
           </select>
 
           {/* Status Filter */}
-          <select 
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
+          <select
+            value={list.filterValues.status ?? 'ALL'}
+            onChange={(e) => list.setFilter('status', e.target.value)}
             className="px-3 py-1.5 text-xs bg-slate-950 border border-[#1e293b] rounded-lg text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
           >
             <option value="ALL">Todos os Status</option>
@@ -343,6 +359,15 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
+
+          {list.activeFilterCount > 0 && (
+            <button
+              onClick={list.clearFilters}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-gray-400 hover:text-white border border-[#1e293b] rounded-lg transition-colors"
+            >
+              <X className="w-3.5 h-3.5" /> Limpar ({list.activeFilterCount})
+            </button>
+          )}
 
           {/* View Mode Switcher */}
           <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-[#1e293b]">
@@ -383,12 +408,28 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-[#1e293b] bg-slate-950/20 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                  <th className="px-6 py-4">Título</th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => list.toggleSort('title')} className="flex items-center gap-1 hover:text-white uppercase">
+                      Título <ArrowUpDown className="w-3 h-3" /> <span className="text-blue-400">{sortIndicator('title')}</span>
+                    </button>
+                  </th>
                   <th className="px-6 py-4">Natureza</th>
-                  <th className="px-6 py-4">Contraparte</th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => list.toggleSort('counterpart')} className="flex items-center gap-1 hover:text-white uppercase">
+                      Contraparte <ArrowUpDown className="w-3 h-3" /> <span className="text-blue-400">{sortIndicator('counterpart')}</span>
+                    </button>
+                  </th>
                   <th className="px-6 py-4">Tipo</th>
-                  <th className="px-6 py-4">Vigência</th>
-                  <th className="px-6 py-4">Valor Total</th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => list.toggleSort('end_date')} className="flex items-center gap-1 hover:text-white uppercase">
+                      Vigência <ArrowUpDown className="w-3 h-3" /> <span className="text-blue-400">{sortIndicator('end_date')}</span>
+                    </button>
+                  </th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => list.toggleSort('total_value')} className="flex items-center gap-1 hover:text-white uppercase">
+                      Valor Total <ArrowUpDown className="w-3 h-3" /> <span className="text-blue-400">{sortIndicator('total_value')}</span>
+                    </button>
+                  </th>
                   <th className="px-6 py-4">Execução</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Ações</th>
@@ -506,10 +547,10 @@ export default function ContractsClient({ initialContracts }: ContractsClientPro
             </table>
           </div>
           <Pagination
-            page={contractsPage}
-            pageSize={CONTRACTS_PAGE_SIZE}
-            totalItems={filteredContracts.length}
-            onPageChange={setContractsPage}
+            page={list.page}
+            pageSize={list.pageSize}
+            totalItems={list.filteredCount}
+            onPageChange={list.setPage}
           />
         </div>
       ) : (
